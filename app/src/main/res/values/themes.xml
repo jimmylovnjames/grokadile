@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme; the real colors come from Compose Material3 dynamic theming.
+         This XML theme only needs to host the activity before Compose draws. -->
+    <style name="Theme.Grokadile" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/grok_background</item>
+    </style>
+</resources>
