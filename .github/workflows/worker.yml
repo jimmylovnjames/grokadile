@@ -1,0 +1,37 @@
+name: Worker CI
+
+on:
+  push:
+    branches: [ main, "claude/**" ]
+    paths: [ "cloudflare/**", ".github/workflows/worker.yml" ]
+  pull_request:
+    paths: [ "cloudflare/**", ".github/workflows/worker.yml" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: cloudflare
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

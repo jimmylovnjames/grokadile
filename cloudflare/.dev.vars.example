@@ -1,0 +1,5 @@
+# Copy to `.dev.vars` for `wrangler dev` (this file is git-ignored when named .dev.vars).
+# These mirror the production secrets set via `wrangler secret put`.
+
+GROK_API_KEY="xai-your-key-here"
+APP_AUTH_TOKEN="choose-a-long-random-string"

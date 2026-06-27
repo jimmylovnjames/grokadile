@@ -1,0 +1,20 @@
+name = "grokadile-worker"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# Non-secret config. Override per-environment as needed.
+[vars]
+GROK_BASE_URL = "https://api.x.ai"
+
+# D1 database holding the agent task queue + activity reports.
+# Create it with:  wrangler d1 create grokadile
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "grokadile"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# Secrets (set via `wrangler secret put <NAME>`, never commit):
+#   GROK_API_KEY    -> your xAI API key (used to call api.x.ai server-side)
+#   APP_AUTH_TOKEN  -> shared bearer token the device must send (set in the app's
+#                      Settings "API key" field). If unset, the worker runs open.
