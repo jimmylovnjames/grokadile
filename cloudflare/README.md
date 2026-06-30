@@ -1,14 +1,18 @@
 # Grokadile Worker
 
-Cloudflare Worker backend for the Grokadile Android app. Two jobs:
+Cloudflare Worker backend for Grokadile. Three jobs:
 
 1. **Grok chat proxy** — `POST /v1/chat/completions` forwards to xAI with a
    server-held API key, so the device never carries it (OpenAI-compatible,
    streaming pass-through).
-2. **Agent control plane** — a D1-backed task queue + activity log the device
-   pulls from and reports to.
+2. **On-device control plane** — a D1-backed task queue + activity log the
+   Android app pulls from and reports to.
+3. **Screen-agent orchestrator** — tasks + live WebSocket control + telemetry
+   for the host-side screen-acting runner (ADB/Playwright), persisted to D1,
+   with failure screenshots in R2.
 
-Built with [Hono](https://hono.dev) + [D1](https://developers.cloudflare.com/d1/).
+Built with [Hono](https://hono.dev), [D1](https://developers.cloudflare.com/d1/),
+[Durable Objects](https://developers.cloudflare.com/durable-objects/), and R2.
 
 ## Endpoints
 
@@ -16,12 +20,44 @@ Built with [Hono](https://hono.dev) + [D1](https://developers.cloudflare.com/d1/
 |---|---|---|---|
 | GET  | `/health` | public | Liveness — `{ status, version, time }` |
 | POST | `/v1/chat/completions` | bearer | Proxy to Grok (injects `GROK_API_KEY`) |
-| GET  | `/agents/:agentId/tasks` | bearer | Pull pending tasks (marks them DELIVERED) |
-| POST | `/agents/:agentId/tasks` | bearer | Enqueue a task: `{ title, payload?, priority? }` |
-| POST | `/agents/:agentId/report` | bearer | Record activity: `{ status, task_id?, detail?, timestamp? }` |
+| POST | `/v1/agent/tasks` | bearer | Create a screen-agent task ⇒ `{ taskId }` |
+| GET  | `/v1/agent/tasks/:id` | bearer | Task record + status |
+| POST | `/v1/agent/tasks/:id/control` | bearer | `{ command:"pause\|resume\|cancel\|answer", payload? }` |
+| GET  | `/v1/agent/connect?agentId=` | bearer | **WebSocket** upgrade → the agent's Durable Object |
+| PUT  | `/v1/agent/screenshots/:id` | bearer | Upload a failure screenshot to R2 |
+| GET  | `/v1/agent/screenshots/:id` | bearer | Fetch a stored screenshot |
+| GET  | `/agents/:agentId/tasks` | bearer | (on-device) Pull pending tasks |
+| POST | `/agents/:agentId/tasks` | bearer | (on-device) Enqueue `{ title, payload?, priority? }` |
+| POST | `/agents/:agentId/report` | bearer | (on-device) Record activity |
 
 Protected routes require `Authorization: Bearer <APP_AUTH_TOKEN>`. If
 `APP_AUTH_TOKEN` is unset the worker runs open (local dev only).
+
+### Screen-agent contract
+
+The contract (zod-validated, shared with the runner) lives in `src/contract.ts`.
+
+**Create a task:**
+```json
+{ "agentId":"pixel-7",
+  "goal":"In Settings, enable Battery Saver",
+  "target":{"platform":"android","deviceId":"emulator-5554"},
+  "constraints":{"maxSteps":12,"allowDestructive":false,"timeoutSec":120},
+  "skills":["android.settings"] }
+```
+
+**WebSocket messages** — agent→worker: `hello · status · observation · action ·
+escalation · result · heartbeat`; worker→agent: `assign · control · ack · error`.
+
+**Grounded action schema** (the runner rejects any `elementId` not in the
+current observation — the core anti-hallucination guard):
+```json
+{"type":"tap","elementId":"e12","reason":"…"}
+{"type":"type","elementId":"e3","text":"…"}
+{"type":"swipe","direction":"up"} | {"type":"key","key":"back"}
+{"type":"wait","ms":500} | {"type":"done"} | {"type":"escalate","reason":"…"}
+```
+Telemetry persists to `agent_traces` (full replay), screenshots to R2.
 
 ## Setup & deploy
 
@@ -31,6 +67,9 @@ npm install
 
 # 1. Create the D1 database, then paste the printed database_id into wrangler.toml
 npx wrangler d1 create grokadile
+
+# 1b. Create the R2 bucket for failure screenshots (binding already in wrangler.toml)
+npx wrangler r2 bucket create grokadile-screenshots
 
 # 2. Apply the schema (local + remote)
 npm run db:init:local

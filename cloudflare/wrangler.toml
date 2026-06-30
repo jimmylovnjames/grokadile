@@ -14,6 +14,20 @@ binding = "DB"
 database_name = "grokadile"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 
+# Per-agent WebSocket coordinator.
+[[durable_objects.bindings]]
+name = "AGENT_SESSION"
+class_name = "AgentSession"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AgentSession"]
+
+# Failure screenshots. Create with:  wrangler r2 bucket create grokadile-screenshots
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "grokadile-screenshots"
+
 # Secrets (set via `wrangler secret put <NAME>`, never commit):
 #   GROK_API_KEY    -> your xAI API key (used to call api.x.ai server-side)
 #   APP_AUTH_TOKEN  -> shared bearer token the device must send (set in the app's

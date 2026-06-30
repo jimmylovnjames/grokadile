@@ -1,6 +1,6 @@
 {
   "name": "grokadile-worker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker backend for Grokadile: Grok (xAI) chat proxy + agent control plane.",
@@ -13,7 +13,8 @@
     "db:init:local": "wrangler d1 execute grokadile --local --file=./schema.sql"
   },
   "dependencies": {
-    "hono": "^4.6.14"
+    "hono": "^4.6.14",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",

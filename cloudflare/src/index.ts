@@ -4,8 +4,16 @@ import { bearerAuth } from './auth';
 import { proxyChat } from './grok';
 import { pullTasks, enqueueTask } from './tasks';
 import { postReport } from './reports';
+import {
+  connectAgent,
+  controlTask,
+  createTask,
+  getScreenshot,
+  getTaskStatus,
+  putScreenshot,
+} from './agentTasks';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -19,7 +27,15 @@ app.use('/agents/*', bearerAuth);
 // Grok chat proxy (key stays server-side).
 app.post('/v1/chat/completions', proxyChat);
 
-// Agent control plane.
+// Screen-agent orchestration: tasks, live WebSocket control, screenshots.
+app.post('/v1/agent/tasks', createTask);
+app.get('/v1/agent/tasks/:id', getTaskStatus);
+app.post('/v1/agent/tasks/:id/control', controlTask);
+app.get('/v1/agent/connect', connectAgent);
+app.put('/v1/agent/screenshots/:id', putScreenshot);
+app.get('/v1/agent/screenshots/:id', getScreenshot);
+
+// Lightweight per-agent control plane used by the on-device app.
 app.get('/agents/:agentId/tasks', pullTasks);
 app.post('/agents/:agentId/tasks', enqueueTask);
 app.post('/agents/:agentId/report', postReport);
@@ -31,3 +47,4 @@ app.onError((err, c) => {
 });
 
 export default app;
+export { AgentSession } from './agentSession';
