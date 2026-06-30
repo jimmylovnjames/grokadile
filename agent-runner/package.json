@@ -1,0 +1,17 @@
+{
+  "name": "grokadile-agent-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Host-side screen-acting agent: state-machine core that observes, reasons, and acts (ADB/Playwright), coordinated by the Grokadile Cloudflare Worker.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
