@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.7 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.8 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Live streaming LLM integration: early JSON parse on deltas for faster ReAct.
-termux_notify + auto recovery + full toolset.
+Easier goals (goal.txt) + voice output (TTS) + streaming + recovery.
 
 Usage:
   python grokadile.py --help
+  Edit goal.txt then: python grokadile.py
   python grokadile.py --demo --goal "Create a timestamped note and verify it"
   GROK_API_KEY=sk-... GROK_MODEL=grok-4.5 python grokadile.py --goal "your task"
-  CF_WORKER_BASE=https://... python grokadile.py --goal "..."
 
 State: ~/grokadile/state/state.json (auto-created)
 Logs:  ~/grokadile/logs/
@@ -76,6 +75,7 @@ Available tools (use exact names):
 - python_exec: Safe limited Python eval (math/json/lists). args: {"code": "sum([1,2,3])"}
 - swarm_status: List other running Grokadile instances for coordination. args: {}
 - termux_notify: Send Android notification (requires termux-api). args: {"title": "...", "content": "...", "priority": "default|high|low"}
+- termux_tts: Speak text out loud (voice feedback). args: {"text": "message to say"}
 
 Rules:
 - Always output valid JSON only.
@@ -99,6 +99,7 @@ cf_call: call Cloudflare worker endpoints (set CF_WORKER_BASE env)
 python_exec: safe limited Python eval for math/json/list ops (no dangerous code)
 swarm_status: detect other Grokadile instances for basic multi-agent coordination
 termux_notify: Android notification via termux-api (pkg install termux-api)
+termux_tts: speak text using phone TTS (voice output for results)
 """
 
 # === STATE MANAGEMENT ===
@@ -425,6 +426,20 @@ def tool_termux_notify(title: str, content: str = "", priority: str = "default")
         return f"ERROR: {str(e)}"
 
 
+def tool_termux_tts(text: str) -> str:
+    """Speak text using termux-tts-speak (voice feedback, requires termux-api)."""
+    try:
+        which = subprocess.run(["which", "termux-tts-speak"], capture_output=True, text=True, timeout=5)
+        if which.returncode != 0:
+            return "ERROR: termux-api not installed (pkg install termux-api)"
+        result = subprocess.run(["termux-tts-speak", text[:400]], capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            return "OK: spoken"
+        return f"ERROR: {result.stderr.strip()}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
 TOOL_MAP = {
     "shell": lambda args: tool_shell(args.get("cmd", "")),
     "read_file": lambda args: tool_read_file(args.get("path", "")),
@@ -438,6 +453,7 @@ TOOL_MAP = {
     "python_exec": lambda args: tool_python_exec(args.get("code", "")),
     "swarm_status": lambda args: tool_swarm_status(),
     "termux_notify": lambda args: tool_termux_notify(args.get("title", "Grokadile"), args.get("content", ""), args.get("priority", "default")),
+    "termux_tts": lambda args: tool_termux_tts(args.get("text", "")),
 }
 
 def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
@@ -593,28 +609,46 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.7 core agent (streaming LLM integration + termux_notify + auto recovery)")
-    parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
-    parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
+    parser = argparse.ArgumentParser(description="Grokadile v0.8 - easier goals + voice output + streaming agent")
+    parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
+    parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
+    parser.add_argument("--demo", action="store_true", help="Run in offline demo mode")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
     parser.add_argument("--state", action="store_true", help="Print current state and exit")
     args = parser.parse_args()
+
+    # First-run friendliness: create dirs + example files
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    example_goal = BASE_DIR / "goal.txt"
+    if not example_goal.exists():
+        example_goal.write_text("List files in current directory and create a note with today's date.\n")
 
     if args.state:
         state = load_state()
         print(json.dumps(state, indent=2))
         return
 
-    if not args.goal:
-        parser.print_help()
-        print("\nExample: python grokadile.py --demo --goal 'Check current directory and write a hello.txt'")
-        return
+    goal = args.goal
+    if not goal:
+        gf = Path(args.goal_file)
+        if gf.exists():
+            goal = gf.read_text().strip()
+        else:
+            parser.print_help()
+            print(f"\nNo goal given. Edit {gf} or use --goal 'your task'")
+            return
 
-    result = run_autonomous(args.goal, demo=args.demo, max_steps=args.max_steps)
+    result = run_autonomous(goal, demo=args.demo, max_steps=args.max_steps)
     print("\n=== RUN COMPLETE ===")
     print(json.dumps(result, indent=2))
     print(f"\nFull state: {STATE_FILE}")
     print(f"Log: {LOG_FILE}")
 
-if __name__ == "__main__":
-    main()
+    # Voice output on success (user friendly)
+    if not demo and result.get("final"):
+        try:
+            subprocess.run(["termux-tts-speak", result["final"][:300]], timeout=10, check=False)
+        except:
+            pass
