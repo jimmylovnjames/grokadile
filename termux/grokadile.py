@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.5 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.6 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Added termux_notify + auto error recovery. Full feature set ready.
+Added streaming LLM hub stub in call_llm (stream=True yields partial tokens).
+Auto recovery + termux_notify + full toolset. 
 
 Usage:
   python grokadile.py --help
@@ -129,7 +130,10 @@ def log(msg: str, level: str = "INFO") -> None:
     print(line, end="")
 
 # === LLM CLIENT (Grok 4.5 / xAI compatible + demo fallback) ===
-def call_llm(messages: List[Dict[str, str]], demo: bool = False) -> str:
+def call_llm(messages: List[Dict[str, str]], demo: bool = False, stream: bool = False) -> str:
+    """Call LLM. If stream=True returns generator of (delta_content or raw chunk str).
+    Stub for streaming LLM hub integration (v0.6). Non-stream path unchanged for compatibility.
+    """
     if demo:
         global DEMO_STEP
         DEMO_STEP += 1
@@ -176,8 +180,36 @@ def call_llm(messages: List[Dict[str, str]], demo: bool = False) -> str:
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": 800,
-        "response_format": {"type": "json_object"},  # works on many Grok-compatible endpoints
+        "response_format": {"type": "json_object"},
     }
+    if stream:
+        # Streaming LLM hub stub (v0.6)
+        # Assumes xAI/Grok-compatible endpoint returns lines with JSON deltas or SSE
+        try:
+            resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=120)
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line:
+                    line = line.decode("utf-8", errors="ignore").strip()
+                    if line.startswith("data: "):
+                        line = line[6:].strip()
+                    if line in ("[DONE]", ""):
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content  # partial token
+                    except json.JSONDecodeError:
+                        if line:
+                            yield line  # raw fallback
+            return
+        except Exception as e:
+            log(f"Streaming LLM error: {e}", "ERROR")
+            raise
+
+    # Non-stream path (existing)
     last_err = None
     for attempt in range(3):
         try:
@@ -189,7 +221,7 @@ def call_llm(messages: List[Dict[str, str]], demo: bool = False) -> str:
         except Exception as e:
             last_err = e
             if attempt < 2:
-                time.sleep(1.5 ** attempt)  # backoff
+                time.sleep(1.5 ** attempt)
     log(f"LLM call failed after retries: {last_err}", "ERROR")
     raise last_err
 
@@ -546,7 +578,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.5 core agent (termux_notify + auto recovery + full toolset)")
+    parser = argparse.ArgumentParser(description="Grokadile v0.6 core agent (streaming LLM stub + termux_notify + auto recovery)")
     parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
