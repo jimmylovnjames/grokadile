@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.1 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.2 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Priorities 1-2 implemented. Runnable in demo mode or with real API key.
+Added: list_dir, grep, http_post + LLM retry. Runnable in demo mode or with real API key.
 
 Usage:
   python grokadile.py --help
@@ -63,6 +63,9 @@ Available tools (use exact names):
 - read_file: Read text file. args: {"path": "relative_or_absolute_under_home"}
 - write_file: Write/overwrite text file. args: {"path": "...", "content": "text"}
 - http_get: Simple GET request. args: {"url": "https://..."}
+- list_dir: List dir contents. args: {"path": "dir"}
+- grep: Search text in files. args: {"pattern": "regex", "path": "dir", "max_results": 20}
+- http_post: POST request. args: {"url": "...", "data": "form", "json_str": "json body"}
 
 Rules:
 - Always output valid JSON only.
@@ -78,6 +81,9 @@ shell: execute whitelisted-safe commands with timeout (e.g. ls, cat, echo, date,
 read_file: read contents of a file under $HOME
 write_file: create or overwrite a file under $HOME (use for notes, scripts, state)
 http_get: fetch public URL content (no auth headers in v0.1)
+list_dir: list directory contents (type + name)
+grep: recursive text search with regex in files under path
+http_post: HTTP POST (form data or JSON body)
 """
 
 # === STATE MANAGEMENT ===
@@ -158,15 +164,20 @@ def call_llm(messages: List[Dict[str, str]], demo: bool = False) -> str:
         "max_tokens": 800,
         "response_format": {"type": "json_object"},  # works on many Grok-compatible endpoints
     }
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        return content
-    except Exception as e:
-        log(f"LLM call failed: {e}", "ERROR")
-        raise
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            return content
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(1.5 ** attempt)  # backoff
+    log(f"LLM call failed after retries: {last_err}", "ERROR")
+    raise last_err
 
 # === TOOL EXECUTORS (priority 3 stubbed but functional) ===
 def tool_shell(cmd: str) -> str:
@@ -228,11 +239,74 @@ def tool_http_get(url: str) -> str:
     except Exception as e:
         return f"ERROR: {str(e)}"
 
+
+def tool_list_dir(path: str = ".") -> str:
+    """List directory contents safely under FS_ROOT. Returns type + name lines."""
+    try:
+        p = Path(path).expanduser().resolve()
+        if not str(p).startswith(str(FS_ROOT)):
+            return "ERROR: path outside allowed FS_ROOT"
+        if not p.is_dir():
+            return f"ERROR: {p} is not a directory"
+        entries = []
+        for item in sorted(p.iterdir()):
+            prefix = "d" if item.is_dir() else "f"
+            entries.append(f"{prefix} {item.name}")
+        return "\n".join(entries[:100])  # safety cap
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def tool_grep(pattern: str, path: str = ".", max_results: int = 20) -> str:
+    """Simple recursive grep under path (text files only). Returns matching lines."""
+    try:
+        p = Path(path).expanduser().resolve()
+        if not str(p).startswith(str(FS_ROOT)):
+            return "ERROR: path outside allowed FS_ROOT"
+        import re
+        regex = re.compile(pattern)
+        matches = []
+        for file_path in p.rglob("*"):
+            if file_path.is_file() and len(matches) < max_results:
+                try:
+                    text = file_path.read_text(encoding="utf-8", errors="ignore")
+                    for i, line in enumerate(text.splitlines(), 1):
+                        if regex.search(line):
+                            matches.append(f"{file_path}:{i}: {line.strip()[:200]}")
+                            if len(matches) >= max_results:
+                                break
+                except:
+                    continue
+        return "\n".join(matches) if matches else "No matches found"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def tool_http_post(url: str, data: str = "", json_str: str = "") -> str:
+    """POST to URL. Use data for form or json_str for JSON body."""
+    try:
+        if not url.startswith(("http://", "https://")):
+            return "ERROR: url must start with http(s)://"
+        headers = {"User-Agent": "Grokadile/0.1"}
+        if json_str:
+            headers["Content-Type"] = "application/json"
+            resp = requests.post(url, data=json_str, headers=headers, timeout=30)
+        else:
+            resp = requests.post(url, data=data, headers=headers, timeout=30)
+        resp.raise_for_status()
+        return f"STATUS={resp.status_code}\n{resp.text[:2000]}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
 TOOL_MAP = {
     "shell": lambda args: tool_shell(args.get("cmd", "")),
     "read_file": lambda args: tool_read_file(args.get("path", "")),
     "write_file": lambda args: tool_write_file(args.get("path", ""), args.get("content", "")),
     "http_get": lambda args: tool_http_get(args.get("url", "")),
+    "list_dir": lambda args: tool_list_dir(args.get("path", ".")),
+    "grep": lambda args: tool_grep(args.get("pattern", ""), args.get("path", "."), int(args.get("max_results", 20))),
+    "http_post": lambda args: tool_http_post(args.get("url", ""), args.get("data", ""), args.get("json_str", "")),
 }
 
 def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
@@ -360,7 +434,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.1 core agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.2 core agent")
     parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
