@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.6 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.7 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Added streaming LLM hub stub in call_llm (stream=True yields partial tokens).
-Auto recovery + termux_notify + full toolset. 
+Live streaming LLM integration: early JSON parse on deltas for faster ReAct.
+termux_notify + auto recovery + full toolset.
 
 Usage:
   python grokadile.py --help
@@ -518,12 +518,27 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
     for step in range(1, max_steps + 1):
         messages = build_messages(state, goal, observation)
         try:
-            raw = call_llm(messages, demo=demo)
-            decision = parse_json_response(raw)
+            if demo:
+                raw = call_llm(messages, demo=True)
+                decision = parse_json_response(raw)
+            else:
+                # Streaming LLM hub integration (v0.7): accumulate deltas, early JSON parse for action/final
+                buffer = ""
+                decision = None
+                for chunk in call_llm(messages, demo=False, stream=True):
+                    buffer += chunk or ""
+                    if len(buffer) > 10:  # avoid empty
+                        try:
+                            candidate = parse_json_response(buffer)
+                            if candidate.get("action") is not None or candidate.get("final_answer"):
+                                decision = candidate
+                                break  # early exit on complete action/final
+                        except:
+                            pass
+                if decision is None:
+                    decision = parse_json_response(buffer)
         except Exception as e:
             log(f"Step {step} LLM error: {e}", "ERROR")
-            state["metrics"]["errors"] += 1
-            save_state(state)
             decision = {"thought": f"LLM error: {e}", "action": None, "args": {}, "final_answer": None}
 
         thought = decision.get("thought", "")
@@ -578,7 +593,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.6 core agent (streaming LLM stub + termux_notify + auto recovery)")
+    parser = argparse.ArgumentParser(description="Grokadile v0.7 core agent (streaming LLM integration + termux_notify + auto recovery)")
     parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
