@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.4 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.5 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Full: memory_retrieve + cf_call + python_exec + swarm_status + list_dir/grep/http_post + retry + decomp guidance. Runnable in demo or with keys.
+Added termux_notify + auto error recovery. Full feature set ready.
 
 Usage:
   python grokadile.py --help
@@ -74,6 +74,7 @@ Available tools (use exact names):
 - cf_call: Call your Cloudflare worker (tasks/reports etc). args: {"path": "/tasks", "payload_json": "{\"key\":\"val\"}"}
 - python_exec: Safe limited Python eval (math/json/lists). args: {"code": "sum([1,2,3])"}
 - swarm_status: List other running Grokadile instances for coordination. args: {}
+- termux_notify: Send Android notification (requires termux-api). args: {"title": "...", "content": "...", "priority": "default|high|low"}
 
 Rules:
 - Always output valid JSON only.
@@ -96,6 +97,7 @@ memory_retrieve: keyword search over persistent facts store
 cf_call: call Cloudflare worker endpoints (set CF_WORKER_BASE env)
 python_exec: safe limited Python eval for math/json/list ops (no dangerous code)
 swarm_status: detect other Grokadile instances for basic multi-agent coordination
+termux_notify: Android notification via termux-api (pkg install termux-api)
 """
 
 # === STATE MANAGEMENT ===
@@ -376,6 +378,21 @@ def tool_swarm_status() -> str:
         return f"ERROR: {str(e)}"
 
 
+def tool_termux_notify(title: str, content: str = "", priority: str = "default") -> str:
+    """Termux notification via termux-api (if installed). Non-blocking user feedback for long runs."""
+    try:
+        which = subprocess.run(["which", "termux-notification"], capture_output=True, text=True, timeout=5)
+        if which.returncode != 0:
+            return "ERROR: termux-api not installed (pkg install termux-api)"
+        cmd = ["termux-notification", "--title", title, "--content", content[:200], "--priority", priority]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return "OK: notification sent"
+        return f"ERROR: {result.stderr.strip() or result.stdout.strip()}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
 TOOL_MAP = {
     "shell": lambda args: tool_shell(args.get("cmd", "")),
     "read_file": lambda args: tool_read_file(args.get("path", "")),
@@ -388,6 +405,7 @@ TOOL_MAP = {
     "cf_call": lambda args: tool_cf_call(args.get("path", "/"), args.get("payload_json", "{}")),
     "python_exec": lambda args: tool_python_exec(args.get("code", "")),
     "swarm_status": lambda args: tool_swarm_status(),
+    "termux_notify": lambda args: tool_termux_notify(args.get("title", "Grokadile"), args.get("content", ""), args.get("priority", "default")),
 }
 
 def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
@@ -496,9 +514,13 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
             observation = obs
             state["last_observation"] = obs
             state["metrics"]["tool_calls"] += 1
-            if "ERROR" in obs:
+            if "ERROR" in str(obs):
                 state["metrics"]["errors"] += 1
-            log(f"Step {step}: {action} -> {obs[:120]}...")
+                # v0.5 improvement: auto recovery on tool error - reflect and retry once
+                if step < max_steps - 1:
+                    observation = f"TOOL ERROR RECOVERY: {str(obs)[:200]}. Reflect on cause and choose alternative tool or approach next."
+                    log(f"Step {step}: ERROR auto-recovery triggered")
+            log(f"Step {step}: {action} -> {str(obs)[:120]}...")
         else:
             observation = ""
             log(f"Step {step}: no action (finalizing)")
@@ -524,7 +546,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.4 core agent (memory_retrieve + cf_call + expanded tools + swarm + python_exec)")
+    parser = argparse.ArgumentParser(description="Grokadile v0.5 core agent (termux_notify + auto recovery + full toolset)")
     parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
