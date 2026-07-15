@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.2 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.3 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Added: list_dir, grep, http_post + LLM retry. Runnable in demo mode or with real API key.
+Added memory_retrieve + cf_call (Cloudflare) + list_dir/grep/http_post + retry. Runnable in demo or with keys.
 
 Usage:
   python grokadile.py --help
   python grokadile.py --demo --goal "Create a timestamped note and verify it"
   GROK_API_KEY=sk-... GROK_MODEL=grok-4.5 python grokadile.py --goal "your task"
+  CF_WORKER_BASE=https://... python grokadile.py --goal "..."
 
 State: ~/grokadile/state/state.json (auto-created)
 Logs:  ~/grokadile/logs/
@@ -41,6 +42,7 @@ LOG_FILE = LOG_DIR / f"grokadile_{datetime.now().strftime('%Y%m%d')}.log"
 DEFAULT_API_BASE = os.getenv("XAI_API_BASE", "https://api.x.ai/v1")
 DEFAULT_MODEL = os.getenv("GROK_MODEL", "grok-4.5")
 API_KEY = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")
+CF_BASE = os.getenv("CF_WORKER_BASE", "")  # e.g. https://your-worker.workers.dev for Cloudflare tool
 
 MAX_STEPS = 12
 SHELL_TIMEOUT = 30  # seconds
@@ -66,6 +68,8 @@ Available tools (use exact names):
 - list_dir: List dir contents. args: {"path": "dir"}
 - grep: Search text in files. args: {"pattern": "regex", "path": "dir", "max_results": 20}
 - http_post: POST request. args: {"url": "...", "data": "form", "json_str": "json body"}
+- memory_retrieve: Search persistent facts. args: {"query": "keyword", "limit": 5}
+- cf_call: Call your Cloudflare worker (tasks/reports etc). args: {"path": "/tasks", "payload_json": "{\"key\":\"val\"}"}
 
 Rules:
 - Always output valid JSON only.
@@ -84,6 +88,8 @@ http_get: fetch public URL content (no auth headers in v0.1)
 list_dir: list directory contents (type + name)
 grep: recursive text search with regex in files under path
 http_post: HTTP POST (form data or JSON body)
+memory_retrieve: keyword search over persistent facts store
+cf_call: call Cloudflare worker endpoints (set CF_WORKER_BASE env)
 """
 
 # === STATE MANAGEMENT ===
@@ -299,6 +305,31 @@ def tool_http_post(url: str, data: str = "", json_str: str = "") -> str:
         return f"ERROR: {str(e)}"
 
 
+def tool_memory_retrieve(query: str, limit: int = 5) -> str:
+    """Retrieve recent facts matching query (simple contains search)."""
+    try:
+        state = load_state()
+        facts = state.get("facts", [])
+        q = query.lower().strip()
+        if not q:
+            return json.dumps(facts[-limit:])
+        matches = [f for f in facts if q in f.get("fact", "").lower()]
+        return json.dumps(matches[-limit:] if matches else [])
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def tool_cf_call(path: str, payload_json: str = "{}") -> str:
+    """Call Cloudflare worker endpoint (e.g. path='/tasks', payload_json='{\"action\":\"list\"}'). Requires CF_WORKER_BASE env."""
+    if not CF_BASE:
+        return "ERROR: CF_WORKER_BASE env var not set (your https://xxx.workers.dev)"
+    try:
+        url = f"{CF_BASE.rstrip('/')}/{path.lstrip('/')}"
+        return tool_http_post(url, json_str=payload_json)
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
 TOOL_MAP = {
     "shell": lambda args: tool_shell(args.get("cmd", "")),
     "read_file": lambda args: tool_read_file(args.get("path", "")),
@@ -307,6 +338,8 @@ TOOL_MAP = {
     "list_dir": lambda args: tool_list_dir(args.get("path", ".")),
     "grep": lambda args: tool_grep(args.get("pattern", ""), args.get("path", "."), int(args.get("max_results", 20))),
     "http_post": lambda args: tool_http_post(args.get("url", ""), args.get("data", ""), args.get("json_str", "")),
+    "memory_retrieve": lambda args: tool_memory_retrieve(args.get("query", ""), int(args.get("limit", 5))),
+    "cf_call": lambda args: tool_cf_call(args.get("path", "/"), args.get("payload_json", "{}")),
 }
 
 def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
@@ -434,7 +467,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.2 core agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.3 core agent (memory_retrieve + cf_call + expanded tools)")
     parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
