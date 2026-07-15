@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.3 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.4 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Added memory_retrieve + cf_call (Cloudflare) + list_dir/grep/http_post + retry. Runnable in demo or with keys.
+Full: memory_retrieve + cf_call + python_exec + swarm_status + list_dir/grep/http_post + retry + decomp guidance. Runnable in demo or with keys.
 
 Usage:
   python grokadile.py --help
@@ -52,9 +52,11 @@ FS_ROOT = HOME  # restrict FS tools to user home for safety
 SYSTEM_PROMPT = """You are Grokadile, a precise autonomous AI agent running on Android via Termux.
 You complete user goals using tools only when necessary. You think step-by-step, verify results, and avoid unnecessary actions.
 
+For complex or multi-part goals, first decompose in your thought into 2-4 numbered subgoals, then tackle sequentially with tools.
+
 Respond with ONE valid JSON object and nothing else:
 {
-  "thought": "short reasoning and plan for this step",
+  "thought": "short reasoning and plan for this step (include decomposition if complex)",
   "action": "tool_name or null if ready to finish",
   "args": {"key": "value"} or {},
   "final_answer": "complete result summary or null if continuing"
@@ -70,6 +72,8 @@ Available tools (use exact names):
 - http_post: POST request. args: {"url": "...", "data": "form", "json_str": "json body"}
 - memory_retrieve: Search persistent facts. args: {"query": "keyword", "limit": 5}
 - cf_call: Call your Cloudflare worker (tasks/reports etc). args: {"path": "/tasks", "payload_json": "{\"key\":\"val\"}"}
+- python_exec: Safe limited Python eval (math/json/lists). args: {"code": "sum([1,2,3])"}
+- swarm_status: List other running Grokadile instances for coordination. args: {}
 
 Rules:
 - Always output valid JSON only.
@@ -90,6 +94,8 @@ grep: recursive text search with regex in files under path
 http_post: HTTP POST (form data or JSON body)
 memory_retrieve: keyword search over persistent facts store
 cf_call: call Cloudflare worker endpoints (set CF_WORKER_BASE env)
+python_exec: safe limited Python eval for math/json/list ops (no dangerous code)
+swarm_status: detect other Grokadile instances for basic multi-agent coordination
 """
 
 # === STATE MANAGEMENT ===
@@ -330,6 +336,46 @@ def tool_cf_call(path: str, payload_json: str = "{}") -> str:
         return f"ERROR: {str(e)}"
 
 
+def tool_python_exec(code: str) -> str:
+    """Safe limited Python eval for computation (no imports, no io, no dangerous builtins). Use for math, json, lists, datetime."""
+    try:
+        if any(bad in code.lower() for bad in ["import", "exec", "eval(", "open(", "__", "subprocess", "os.", "sys.", "file"]):
+            return "ERROR: restricted keywords blocked for safety"
+        safe_builtins = {
+            "len": len, "str": str, "int": int, "float": float, "bool": bool,
+            "list": list, "dict": dict, "tuple": tuple, "set": set,
+            "sum": sum, "min": min, "max": max, "abs": abs, "round": round,
+            "sorted": sorted, "range": range, "enumerate": enumerate,
+            "zip": zip, "map": map, "filter": filter,
+            "json": json, "datetime": datetime, "re": __import__("re")
+        }
+        safe_globals = {"__builtins__": safe_builtins}
+        # eval expression only
+        result = eval(code, safe_globals, {})
+        return repr(result)[:800]
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def tool_swarm_status() -> str:
+    """Basic swarm status: list other Grokadile state files in parent dir for multi-instance coord."""
+    try:
+        parent = BASE_DIR.parent
+        states = list(parent.glob("grokadile*/state/state.json"))
+        if not states:
+            return "No other swarm members detected"
+        info = []
+        for s in states[:10]:
+            try:
+                st = json.loads(s.read_text())
+                info.append(f"{s.parent.name}: goal={st.get('goal','')[:40]} steps={len(st.get('steps',[]))}")
+            except:
+                info.append(f"{s.parent.name}: unreadable")
+        return "\n".join(info)
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
 TOOL_MAP = {
     "shell": lambda args: tool_shell(args.get("cmd", "")),
     "read_file": lambda args: tool_read_file(args.get("path", "")),
@@ -340,6 +386,8 @@ TOOL_MAP = {
     "http_post": lambda args: tool_http_post(args.get("url", ""), args.get("data", ""), args.get("json_str", "")),
     "memory_retrieve": lambda args: tool_memory_retrieve(args.get("query", ""), int(args.get("limit", 5))),
     "cf_call": lambda args: tool_cf_call(args.get("path", "/"), args.get("payload_json", "{}")),
+    "python_exec": lambda args: tool_python_exec(args.get("code", "")),
+    "swarm_status": lambda args: tool_swarm_status(),
 }
 
 def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
@@ -405,6 +453,8 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
     state["goal"] = goal
     if not state.get("steps"):
         state["steps"] = []
+    # basic observability metrics
+    state.setdefault("metrics", {"tool_calls": 0, "errors": 0, "finals": 0})
     save_state(state)
 
     log(f"Starting autonomous run. Goal: {goal} (demo={demo})")
@@ -422,6 +472,8 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
             decision = parse_json_response(raw)
         except Exception as e:
             log(f"Step {step} LLM error: {e}", "ERROR")
+            state["metrics"]["errors"] += 1
+            save_state(state)
             decision = {"thought": f"LLM error: {e}", "action": None, "args": {}, "final_answer": None}
 
         thought = decision.get("thought", "")
@@ -443,10 +495,15 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
             step_record["observation"] = obs
             observation = obs
             state["last_observation"] = obs
+            state["metrics"]["tool_calls"] += 1
+            if "ERROR" in obs:
+                state["metrics"]["errors"] += 1
             log(f"Step {step}: {action} -> {obs[:120]}...")
         else:
             observation = ""
             log(f"Step {step}: no action (finalizing)")
+            if final:
+                state["metrics"]["finals"] += 1
 
         state["steps"].append(step_record)
         if thought:
@@ -463,11 +520,11 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
         final = "Max steps reached without explicit final_answer. Check state.json for partial progress."
         log(final, "WARN")
 
-    return {"goal": goal, "final": final, "steps_taken": len(state["steps"]), "state_file": str(STATE_FILE)}
+    return {"goal": goal, "final": final, "steps_taken": len(state["steps"]), "state_file": str(STATE_FILE), "metrics": state.get("metrics", {})}
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.3 core agent (memory_retrieve + cf_call + expanded tools)")
+    parser = argparse.ArgumentParser(description="Grokadile v0.4 core agent (memory_retrieve + cf_call + expanded tools + swarm + python_exec)")
     parser.add_argument("--goal", type=str, help="Task for the agent to complete autonomously")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode (no API key required)")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
