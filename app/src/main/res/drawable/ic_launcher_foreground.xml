@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Stylized "grok" spark, centered in the 72dp adaptive safe zone. -->
+    <path
+        android:fillColor="#FF4ADE80"
+        android:pathData="M54,24 L60.36,47.64 L84,54 L60.36,60.36 L54,84 L47.64,60.36 L24,54 L47.64,47.64 Z" />
+    <path
+        android:fillColor="#FF22C55E"
+        android:pathData="M54,38 L57,51 L70,54 L57,57 L54,70 L51,57 L38,54 L51,51 Z" />
+</vector>
