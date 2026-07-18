@@ -78,6 +78,8 @@ class GrokadileTestCase(unittest.TestCase):
     def setUp(self):
         if grokadile.STATE_FILE.exists():
             grokadile.STATE_FILE.unlink()
+        if grokadile.INBOX_FILE.exists():
+            grokadile.INBOX_FILE.unlink()
         MockLLMHandler.decisions = []
         MockLLMHandler.calls = 0
         MockLLMHandler.payloads = []
@@ -212,6 +214,82 @@ class TestChatCompanion(GrokadileTestCase):
         state["profile"] = [{"fact": "User's name is Jimmy", "when": "now"}]
         messages = grokadile.build_messages(state, "some goal")
         self.assertIn("User's name is Jimmy", messages[1]["content"])
+
+
+DAYTIME = __import__("datetime").datetime(2026, 7, 18, 14, 0)   # 2pm, not quiet
+NIGHTTIME = __import__("datetime").datetime(2026, 7, 18, 23, 30)  # in quiet hours
+
+
+class TestProactive(GrokadileTestCase):
+    def test_quiet_hours_wrap_midnight(self):
+        self.assertTrue(grokadile.is_quiet_hours(NIGHTTIME))
+        self.assertTrue(grokadile.is_quiet_hours(NIGHTTIME.replace(hour=3)))
+        self.assertFalse(grokadile.is_quiet_hours(DAYTIME))
+
+    def test_checkin_silent_during_quiet_hours(self):
+        state = grokadile.load_state()
+        self.assertIsNone(grokadile.proactive_checkin(state, demo=True, now=NIGHTTIME))
+
+    def test_checkin_rate_limited(self):
+        state = grokadile.load_state()
+        first = grokadile.proactive_checkin(state, demo=True, now=DAYTIME)
+        self.assertIsNotNone(first)
+        again = grokadile.proactive_checkin(
+            state, demo=True, now=DAYTIME.replace(minute=30))
+        self.assertIsNone(again)
+
+    def test_checkin_uses_llm_and_can_decline(self):
+        MockLLMHandler.decisions = [
+            {"message": None, "reason": "nothing to add"},
+        ]
+        state = grokadile.load_state()
+        self.assertIsNone(grokadile.proactive_checkin(state, demo=False, now=DAYTIME))
+        self.assertEqual(MockLLMHandler.calls, 1)
+        # a declined attempt still counts against the rate limit
+        self.assertIsNotNone(grokadile.load_state().get("last_checkin"))
+
+    def test_checkin_delivers_llm_message(self):
+        MockLLMHandler.decisions = [
+            {"message": "Morning Jimmy! Coffee thoughts?", "reason": "morning hello"},
+        ]
+        state = grokadile.load_state()
+        message = grokadile.proactive_checkin(state, demo=False, now=DAYTIME)
+        self.assertEqual(message, "Morning Jimmy! Coffee thoughts?")
+
+
+class TestDaemon(GrokadileTestCase):
+    def test_tell_queues_and_tick_answers(self):
+        grokadile.tell("hello from the widget")
+        state = grokadile.load_state()
+        state["last_checkin"] = DAYTIME.isoformat()  # suppress checkin
+        summary = grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        self.assertEqual(summary["messages_handled"], 1)
+        convo = grokadile.load_state()["conversation"]
+        self.assertEqual(convo[-1]["user"], "hello from the widget")
+
+    def test_tick_does_not_reprocess_inbox(self):
+        grokadile.tell("only once")
+        state = grokadile.load_state()
+        state["last_checkin"] = DAYTIME.isoformat()
+        grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        summary = grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        self.assertEqual(summary["messages_handled"], 0)
+
+    def test_tick_runs_dispatched_tasks(self):
+        grokadile.tell("create a note for me")
+        state = grokadile.load_state()
+        state["last_checkin"] = DAYTIME.isoformat()
+        summary = grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        self.assertEqual(summary["messages_handled"], 1)
+        # demo ReAct loop ran to completion off the dispatched task
+        self.assertGreaterEqual(grokadile.load_state()["metrics"]["finals"], 1)
+
+    def test_tick_proactive_checkin_recorded(self):
+        state = grokadile.load_state()
+        summary = grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        self.assertIsNotNone(summary["checkin"])
+        convo = grokadile.load_state()["conversation"]
+        self.assertEqual(convo[-1]["user"], "(proactive)")
 
 
 class TestToolSafety(GrokadileTestCase):

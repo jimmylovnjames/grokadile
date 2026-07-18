@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.10 - Autonomous agent + voice companion for Android/Termux + Grok 4.5
+Grokadile v0.11 - Always-there AI companion for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Companion chat mode (voice in/out, persistent memory of you) + task engine.
+Companion chat (voice in/out, persistent memory of you) + task engine
++ daemon presence (inbox, proactive check-ins, notifications).
 
 Usage:
   python grokadile.py --help
   python grokadile.py --voice          # talk to your phone, it talks back
   python grokadile.py --chat           # same, typed
+  python grokadile.py --daemon         # always-on: watches inbox, checks in on you
+  python grokadile.py --tell "text"    # drop a message into the daemon's inbox
+  python grokadile.py --checkin        # one-shot proactive check (for schedulers)
   Edit goal.txt then: python grokadile.py
   python grokadile.py --demo --goal "Create a timestamped note and verify it"
   GROK_API_KEY=sk-... GROK_MODEL=grok-4.5 python grokadile.py --goal "your task"
@@ -49,6 +53,12 @@ CF_BASE = os.getenv("CF_WORKER_BASE", "")  # e.g. https://your-worker.workers.de
 MAX_STEPS = 12
 SHELL_TIMEOUT = 30  # seconds
 FS_ROOT = HOME  # restrict FS tools to user home for safety
+
+# Daemon presence (v0.11)
+INBOX_FILE = BASE_DIR / "inbox.txt"
+CHECKIN_MINUTES = int(os.getenv("GROKADILE_CHECKIN_MINUTES", "180"))
+QUIET_START = int(os.getenv("GROKADILE_QUIET_START", "22"))  # hour, inclusive
+QUIET_END = int(os.getenv("GROKADILE_QUIET_END", "8"))       # hour, exclusive
 
 # === SYSTEM PROMPT (Grok 4.5 level: plan, reflect, tool use, verify) ===
 SYSTEM_PROMPT = """You are Grokadile, a precise autonomous AI agent running on Android via Termux.
@@ -786,13 +796,165 @@ def run_chat(voice: bool = False, demo: bool = False) -> None:
             speak(f"Done. {str(result.get('final', ''))[:300]}", voice)
 
 
+# === DAEMON PRESENCE (v0.11): inbox, proactive check-ins, always-on loop ===
+CHECKIN_SYSTEM_PROMPT = """You are Grokadile, the AI companion living on your user's Android phone.
+Right now nobody is talking to you. Decide whether to proactively reach out.
+
+You receive PROFILE (lasting facts about your user), recent CONVERSATION, and the current TIME.
+
+Respond with ONE valid JSON object and nothing else:
+{
+  "message": "a short, warm, genuinely useful outreach (1-2 sentences) or null",
+  "reason": "one line on why you are or aren't reaching out"
+}
+
+Reach out ONLY when it adds real value: a morning hello, following up on something they mentioned, a gentle nudge after a long silence following an active conversation. If there's nothing worth saying, message must be null. Never be needy or repetitive."""
+
+
+def tell(message: str) -> str:
+    """Queue a message for the daemon from anywhere (widgets, Tasker, scripts)."""
+    INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    line = message.strip().replace("\n", " ")
+    with INBOX_FILE.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    return line
+
+
+def read_inbox_new(state: Dict[str, Any]) -> List[str]:
+    """Return inbox lines added since the last read; advances the stored offset."""
+    if not INBOX_FILE.exists():
+        return []
+    data = INBOX_FILE.read_text(encoding="utf-8", errors="replace")
+    offset = int(state.get("inbox_offset", 0))
+    if offset > len(data):  # inbox was truncated/rotated
+        offset = 0
+    new = data[offset:]
+    state["inbox_offset"] = len(data)
+    return [line.strip() for line in new.splitlines() if line.strip()]
+
+
+def is_quiet_hours(now: Optional[datetime] = None) -> bool:
+    hour = (now or datetime.now()).hour
+    if QUIET_START <= QUIET_END:
+        return QUIET_START <= hour < QUIET_END
+    return hour >= QUIET_START or hour < QUIET_END  # wraps midnight
+
+
+def deliver(text: str, voice: bool = False) -> None:
+    """Get a message to the user however possible: console, notification, voice."""
+    speak(text, voice)
+    tool_termux_notify("Grokadile", text[:200])  # harmless ERROR string off-phone
+
+
+def record_proactive(state: Dict[str, Any], message: str) -> None:
+    state.setdefault("conversation", []).append({
+        "user": "(proactive)",
+        "grokadile": message[:300],
+        "when": datetime.now().isoformat(),
+    })
+    state["conversation"] = state["conversation"][-40:]
+    save_state(state)
+
+
+def proactive_checkin(state: Dict[str, Any], demo: bool = False,
+                      now: Optional[datetime] = None) -> Optional[str]:
+    """Decide whether to reach out unprompted. Returns the message or None.
+    Rate-limited (CHECKIN_MINUTES) and silent during quiet hours; records the
+    attempt either way so the model isn't consulted every tick."""
+    now = now or datetime.now()
+    if is_quiet_hours(now):
+        return None
+    last = state.get("last_checkin")
+    if last:
+        try:
+            minutes_since = (now - datetime.fromisoformat(last)).total_seconds() / 60
+            if minutes_since < CHECKIN_MINUTES:
+                return None
+        except ValueError:
+            pass
+    state["last_checkin"] = now.isoformat()
+    save_state(state)
+
+    if demo:
+        name = user_name(state)
+        return f"Hey{' ' + name if name else ''}, just checking in. Anything I can do for you?"
+
+    profile = state.get("profile", [])[-10:]
+    convo = state.get("conversation", [])[-8:]
+    user_content = f"""PROFILE (lasting facts about your user):
+{json.dumps(profile, indent=2) if profile else "Nothing known yet"}
+
+CONVERSATION (recent):
+{json.dumps(convo, indent=2) if convo else "You have never spoken"}
+
+TIME: {now.strftime("%A %H:%M")}
+
+Respond with the required JSON only."""
+    messages = [
+        {"role": "system", "content": CHECKIN_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    try:
+        raw = call_llm(messages)
+        obj = parse_json_strict(raw) or {}
+        message = obj.get("message")
+        return str(message) if message else None
+    except Exception as e:
+        log(f"Checkin LLM error: {e}", "ERROR")
+        return None
+
+
+def daemon_tick(state: Dict[str, Any], demo: bool = False, voice: bool = False,
+                now: Optional[datetime] = None) -> Dict[str, Any]:
+    """One daemon cycle: answer anything in the inbox, then maybe check in."""
+    handled = 0
+    for message in read_inbox_new(state):
+        log(f"Inbox: {message[:80]}")
+        decision = chat_turn(state, message, demo=demo)
+        deliver(decision.get("reply", ""), voice)
+        task = decision.get("task")
+        if task:
+            result = run_autonomous(str(task), demo=demo)
+            state.clear()
+            state.update(load_state())  # resync shared state after the task run
+            deliver(f"Done. {str(result.get('final', ''))[:200]}", voice)
+        handled += 1
+
+    checkin = proactive_checkin(state, demo=demo, now=now)
+    if checkin:
+        deliver(checkin, voice)
+        record_proactive(state, checkin)
+    return {"messages_handled": handled, "checkin": checkin}
+
+
+def run_daemon(voice: bool = False, demo: bool = False, poll_seconds: int = 30) -> None:
+    """Always-on presence: hold a wake lock, watch the inbox, check in on you."""
+    try:
+        subprocess.run(["termux-wake-lock"], capture_output=True, timeout=5, check=False)
+    except Exception:
+        pass
+    log(f"Daemon started (poll={poll_seconds}s, checkin>={CHECKIN_MINUTES}min, "
+        f"quiet {QUIET_START}:00-{QUIET_END}:00). Queue messages with --tell.")
+    state = load_state()
+    while True:
+        try:
+            daemon_tick(state, demo=demo, voice=voice)
+        except Exception as e:
+            log(f"Daemon tick error: {e}", "ERROR")
+        time.sleep(poll_seconds)
+
+
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.10 - voice companion + autonomous task agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.11 - always-there voice companion + autonomous task agent")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
     parser.add_argument("--chat", action="store_true", help="Companion mode: an ongoing typed conversation")
-    parser.add_argument("--voice", action="store_true", help="Companion mode with voice in/out (needs termux-api)")
+    parser.add_argument("--voice", action="store_true", help="Voice in/out (companion or daemon mode, needs termux-api)")
+    parser.add_argument("--daemon", action="store_true", help="Always-on: watch inbox, proactive check-ins")
+    parser.add_argument("--tell", type=str, metavar="TEXT", help="Queue a message for the daemon and exit")
+    parser.add_argument("--checkin", action="store_true", help="One-shot proactive check (for termux-job-scheduler/cron)")
+    parser.add_argument("--poll", type=int, default=30, help="Daemon inbox poll interval in seconds")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
     parser.add_argument("--state", action="store_true", help="Print current state and exit")
@@ -809,6 +971,25 @@ def main():
     if args.state:
         state = load_state()
         print(json.dumps(state, indent=2))
+        return
+
+    if args.tell:
+        queued = tell(args.tell)
+        print(f"Queued for Grokadile: {queued}")
+        return
+
+    if args.checkin:
+        state = load_state()
+        message = proactive_checkin(state, demo=args.demo)
+        if message:
+            deliver(message, voice=args.voice)
+            record_proactive(state, message)
+        else:
+            print("(nothing worth saying right now)")
+        return
+
+    if args.daemon:
+        run_daemon(voice=args.voice, demo=args.demo, poll_seconds=args.poll)
         return
 
     if args.chat or args.voice:

@@ -1,10 +1,11 @@
-# Grokadile Termux Core (v0.10)
+# Grokadile Termux Core (v0.11)
 
 Your phone as a person. Single-file AI companion + autonomous agent for
 Android (Termux) + Grok 4.5 (or any OpenAI-compatible LLM endpoint):
 talk to it out loud, it talks back, remembers who you are across sessions,
-and goes off to do real work on the phone mid-conversation via a
-JSON-action ReAct loop with streaming, tool safety guards, and demo mode.
+stays present in the background and sometimes reaches out first, and goes
+off to do real work on the phone mid-conversation via a JSON-action ReAct
+loop with streaming, tool safety guards, and demo mode.
 
 ## Quickstart (Termux on Android)
 
@@ -48,6 +49,47 @@ just asked for a **task** — in which case it hands the goal to the autonomous
 ReAct engine, does the work, and tells you the result out loud. Voice input
 uses `termux-speech-to-text` and falls back to typing if unavailable; say
 "bye" to leave. Works offline with `--demo`.
+
+## Always there (daemon mode)
+
+```bash
+# Keep Grokadile present in the background (add --voice for spoken replies)
+nohup python grokadile.py --daemon > /dev/null 2>&1 &
+
+# Message it from anywhere - another terminal, a Termux widget, Tasker...
+python grokadile.py --tell "remind me what I was working on"
+```
+
+The daemon holds a wake lock, watches `~/grokadile/inbox.txt` for messages
+(anything can append to it; `--tell` is the shortcut), answers through
+Android notifications (plus voice with `--voice`), and runs dispatched tasks.
+Between messages it makes **proactive check-ins**: the model sees your
+profile, recent conversation, and the time of day, and decides whether it
+has something genuinely worth saying — a morning hello, a follow-up on
+something you mentioned. Check-ins are rate-limited
+(`GROKADILE_CHECKIN_MINUTES`, default 180) and silent during quiet hours
+(`GROKADILE_QUIET_START`/`GROKADILE_QUIET_END`, default 22:00-08:00).
+
+For a one-tap phone widget, drop a script in `~/.shortcuts/` (Termux:Widget):
+
+```bash
+mkdir -p ~/.shortcuts
+cat > ~/.shortcuts/grokadile.sh <<'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+msg=$(termux-dialog text -t "Tell Grokadile" \
+  | python -c "import sys,json; print(json.load(sys.stdin).get('text',''))")
+[ -n "$msg" ] && python ~/grokadile/termux/grokadile.py --tell "$msg"
+EOF
+chmod +x ~/.shortcuts/grokadile.sh
+```
+
+Prefer scheduled wake-ups over an always-on process? Run `--checkin` from
+cron or `termux-job-scheduler` — it makes one proactive decision and exits
+(`checkin.sh` in this directory wraps it):
+
+```bash
+termux-job-scheduler --script ~/grokadile/termux/checkin.sh --period-ms 900000
+```
 
 ## Tools available to the agent
 
@@ -94,6 +136,10 @@ every push touching `termux/` (`.github/workflows/termux.yml`).
 
 ## Version history
 
+- v0.11 — always-there presence: `--daemon` (inbox watching, wake lock,
+  notification replies), `--tell` message queue, LLM-driven proactive
+  check-ins with quiet hours + rate limiting, `--checkin` one-shot mode
+  for schedulers.
 - v0.10 — companion mode (`--chat` / `--voice`): ongoing conversation with
   voice in/out, persistent profile memory (remembers your name and facts
   across sessions), and mid-conversation task dispatch to the ReAct engine.
