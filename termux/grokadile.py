@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.8 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.9 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
 Easier goals (goal.txt) + voice output (TTS) + streaming + recovery.
 
@@ -127,14 +127,66 @@ def log(msg: str, level: str = "INFO") -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().isoformat()
     line = f"[{timestamp}] [{level}] {msg}\n"
-    LOG_FILE.write_text(LOG_FILE.read_text() + line if LOG_FILE.exists() else line)
+    with LOG_FILE.open("a", encoding="utf-8") as f:
+        f.write(line)
     print(line, end="")
 
 # === LLM CLIENT (Grok 4.5 / xAI compatible + demo fallback) ===
-def call_llm(messages: List[Dict[str, str]], demo: bool = False, stream: bool = False) -> str:
-    """Call LLM. If stream=True returns generator of (delta_content or raw chunk str).
-    Stub for streaming LLM hub integration (v0.6). Non-stream path unchanged for compatibility.
+def _llm_request_parts(messages: List[Dict[str, str]], stream: bool):
+    url = f"{DEFAULT_API_BASE}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": DEFAULT_MODEL,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 800,
+        "response_format": {"type": "json_object"},
+    }
+    if stream:
+        payload["stream"] = True
+    return url, headers, payload
+
+
+def stream_llm(messages: List[Dict[str, str]]):
+    """Generator yielding content deltas from a streaming (SSE) chat completion.
+
+    Kept separate from call_llm: a `yield` anywhere in a function makes the
+    whole function a generator, which would break the plain string returns of
+    the demo and non-stream paths.
     """
+    url, headers, payload = _llm_request_parts(messages, stream=True)
+    try:
+        resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=120)
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if line:
+                line = line.decode("utf-8", errors="ignore").strip()
+                if line.startswith("data: "):
+                    line = line[6:].strip()
+                if line in ("[DONE]", ""):
+                    continue
+                try:
+                    chunk = json.loads(line)
+                    choice = chunk.get("choices", [{}])[0]
+                    content = choice.get("delta", {}).get("content", "")
+                    if not content:
+                        # non-stream-shaped body (server ignored stream flag)
+                        content = choice.get("message", {}).get("content", "")
+                    if content:
+                        yield content
+                except json.JSONDecodeError:
+                    if line:
+                        yield line  # raw fallback
+    except Exception as e:
+        log(f"Streaming LLM error: {e}", "ERROR")
+        raise
+
+
+def call_llm(messages: List[Dict[str, str]], demo: bool = False, stream: bool = False):
+    """Call LLM. Returns the response string, or a delta generator if stream=True."""
     if demo:
         global DEMO_STEP
         DEMO_STEP += 1
@@ -171,46 +223,11 @@ def call_llm(messages: List[Dict[str, str]], demo: bool = False, stream: bool = 
     if not API_KEY:
         raise RuntimeError("GROK_API_KEY or XAI_API_KEY not set. Use --demo for testing.")
 
-    url = f"{DEFAULT_API_BASE}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": DEFAULT_MODEL,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": 800,
-        "response_format": {"type": "json_object"},
-    }
     if stream:
-        # Streaming LLM hub stub (v0.6)
-        # Assumes xAI/Grok-compatible endpoint returns lines with JSON deltas or SSE
-        try:
-            resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=120)
-            resp.raise_for_status()
-            for line in resp.iter_lines():
-                if line:
-                    line = line.decode("utf-8", errors="ignore").strip()
-                    if line.startswith("data: "):
-                        line = line[6:].strip()
-                    if line in ("[DONE]", ""):
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content  # partial token
-                    except json.JSONDecodeError:
-                        if line:
-                            yield line  # raw fallback
-            return
-        except Exception as e:
-            log(f"Streaming LLM error: {e}", "ERROR")
-            raise
+        return stream_llm(messages)
 
-    # Non-stream path (existing)
+    # Non-stream path
+    url, headers, payload = _llm_request_parts(messages, stream=False)
     last_err = None
     for attempt in range(3):
         try:
@@ -488,30 +505,34 @@ Respond with the required JSON only."""
         {"role": "user", "content": user_content},
     ]
 
-def parse_json_response(text: str) -> Dict[str, Any]:
+def parse_json_strict(text: str) -> Optional[Dict[str, Any]]:
+    """Parse text as a JSON object, or return None. No lossy fallback — safe to
+    call on a partial streaming buffer to detect when the object is complete."""
     text = text.strip()
-    # Try direct JSON
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # Try fenced block
+    candidates = [text]
     if "```json" in text:
         start = text.find("```json") + 7
         end = text.find("```", start)
         if end > start:
-            try:
-                return json.loads(text[start:end].strip())
-            except:
-                pass
-    # Fallback: try to find first { ... }
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
-    except:
-        pass
+            candidates.append(text[start:end].strip())
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        candidates.append(text[start:end])
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def parse_json_response(text: str) -> Dict[str, Any]:
+    obj = parse_json_strict(text)
+    if obj is not None:
+        return obj
     return {"thought": "Failed to parse LLM response as JSON", "action": None, "args": {}, "final_answer": text[:500]}
 
 def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) -> Dict[str, Any]:
@@ -543,14 +564,12 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
                 decision = None
                 for chunk in call_llm(messages, demo=False, stream=True):
                     buffer += chunk or ""
-                    if len(buffer) > 10:  # avoid empty
-                        try:
-                            candidate = parse_json_response(buffer)
-                            if candidate.get("action") is not None or candidate.get("final_answer"):
-                                decision = candidate
-                                break  # early exit on complete action/final
-                        except:
-                            pass
+                    # strict parse only: a partial buffer must never be mistaken
+                    # for a finished decision
+                    candidate = parse_json_strict(buffer)
+                    if candidate is not None and (candidate.get("action") or candidate.get("final_answer")):
+                        decision = candidate
+                        break  # early exit on complete action/final
                 if decision is None:
                     decision = parse_json_response(buffer)
         except Exception as e:
@@ -609,7 +628,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.8 - easier goals + voice output + streaming agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.9 - easier goals + voice output + streaming agent")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode")
@@ -647,8 +666,12 @@ def main():
     print(f"Log: {LOG_FILE}")
 
     # Voice output on success (user friendly)
-    if not demo and result.get("final"):
+    if not args.demo and result.get("final"):
         try:
             subprocess.run(["termux-tts-speak", result["final"][:300]], timeout=10, check=False)
         except:
             pass
+
+
+if __name__ == "__main__":
+    main()
