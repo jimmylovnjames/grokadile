@@ -26,8 +26,10 @@ import grokadile  # noqa: E402
 
 
 class MockLLMHandler(BaseHTTPRequestHandler):
-    """Serves scripted decisions as SSE deltas, split into small chunks so a
-    partial buffer is never valid JSON — exercising the early-exit parser."""
+    """Serves scripted decisions. Streaming requests get SSE deltas split into
+    small chunks so a partial buffer is never valid JSON (exercising the
+    early-exit parser); non-stream requests (the chat path) get a plain
+    completion body. A decision given as a raw string is served verbatim."""
 
     decisions = []
     calls = 0
@@ -39,15 +41,23 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         cls.payloads.append(body)
         idx = min(cls.calls, len(cls.decisions) - 1)
         cls.calls += 1
-        content = json.dumps(cls.decisions[idx])
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.end_headers()
-        third = max(1, len(content) // 3)
-        for i in range(0, len(content), third):
-            chunk = {"choices": [{"delta": {"content": content[i:i + third]}}]}
-            self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
-        self.wfile.write(b"data: [DONE]\n\n")
+        decision = cls.decisions[idx]
+        content = decision if isinstance(decision, str) else json.dumps(decision)
+        if body.get("stream"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            third = max(1, len(content) // 3)
+            for i in range(0, len(content), third):
+                chunk = {"choices": [{"delta": {"content": content[i:i + third]}}]}
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
+        else:
+            resp = {"choices": [{"message": {"content": content}}]}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(resp).encode())
 
     def log_message(self, *args):
         pass
@@ -141,6 +151,67 @@ class TestStreamingLoop(GrokadileTestCase):
         result = grokadile.run_autonomous("mock goal", demo=False, max_steps=2)
         self.assertEqual(result["final"],
                          "COMPLETE ANSWER WITH ENOUGH LENGTH TO SPAN CHUNKS")
+
+
+class TestChatCompanion(GrokadileTestCase):
+    def test_chat_turn_replies_and_logs_conversation(self):
+        MockLLMHandler.decisions = [
+            {"reply": "hello there", "remember": None, "task": None},
+        ]
+        state = grokadile.load_state()
+        decision = grokadile.chat_turn(state, "hi", demo=False)
+        self.assertEqual(decision["reply"], "hello there")
+        # chat uses the plain (non-stream) completion path
+        self.assertNotIn("stream", MockLLMHandler.payloads[0])
+        persisted = grokadile.load_state()
+        self.assertEqual(persisted["conversation"][-1]["user"], "hi")
+        self.assertEqual(persisted["conversation"][-1]["grokadile"], "hello there")
+
+    def test_chat_turn_remembers_profile_facts(self):
+        MockLLMHandler.decisions = [
+            {"reply": "Nice to meet you, Jimmy!",
+             "remember": "User's name is Jimmy", "task": None},
+        ]
+        state = grokadile.load_state()
+        grokadile.chat_turn(state, "my name is Jimmy", demo=False)
+        persisted = grokadile.load_state()
+        facts = [f["fact"] for f in persisted.get("profile", [])]
+        self.assertIn("User's name is Jimmy", facts)
+        self.assertEqual(grokadile.user_name(persisted), "Jimmy")
+
+    def test_chat_turn_returns_task_without_running_it(self):
+        MockLLMHandler.decisions = [
+            {"reply": "On it.", "remember": None, "task": "create a note"},
+        ]
+        state = grokadile.load_state()
+        decision = grokadile.chat_turn(state, "make me a note", demo=False)
+        self.assertEqual(decision["task"], "create a note")
+        self.assertEqual(MockLLMHandler.calls, 1)  # no ReAct calls yet
+
+    def test_chat_turn_plain_text_becomes_reply(self):
+        MockLLMHandler.decisions = ["just plain words, no JSON"]
+        state = grokadile.load_state()
+        decision = grokadile.chat_turn(state, "hey", demo=False)
+        self.assertEqual(decision["reply"], "just plain words, no JSON")
+        self.assertIsNone(decision.get("task"))
+
+    def test_demo_chat_learns_name(self):
+        state = grokadile.load_state()
+        decision = grokadile.chat_turn(state, "My name is Jimmy.", demo=True)
+        self.assertIn("Jimmy", decision["reply"])
+        self.assertEqual(grokadile.user_name(grokadile.load_state()), "Jimmy")
+
+    def test_demo_chat_dispatches_task_requests(self):
+        decision = grokadile.demo_chat_response("create a note with today's date")
+        self.assertEqual(decision["task"], "create a note with today's date")
+        chat = grokadile.demo_chat_response("how are you?")
+        self.assertIsNone(chat["task"])
+
+    def test_profile_reaches_autonomous_prompt(self):
+        state = grokadile.load_state()
+        state["profile"] = [{"fact": "User's name is Jimmy", "when": "now"}]
+        messages = grokadile.build_messages(state, "some goal")
+        self.assertIn("User's name is Jimmy", messages[1]["content"])
 
 
 class TestToolSafety(GrokadileTestCase):

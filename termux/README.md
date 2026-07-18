@@ -1,8 +1,10 @@
-# Grokadile Termux Core (v0.9)
+# Grokadile Termux Core (v0.10)
 
-Single-file autonomous AI agent for Android (Termux) + Grok 4.5 (or any
-OpenAI-compatible LLM endpoint). JSON-action ReAct loop with streaming,
-persistent state, tool safety guards, and offline demo mode.
+Your phone as a person. Single-file AI companion + autonomous agent for
+Android (Termux) + Grok 4.5 (or any OpenAI-compatible LLM endpoint):
+talk to it out loud, it talks back, remembers who you are across sessions,
+and goes off to do real work on the phone mid-conversation via a
+JSON-action ReAct loop with streaming, tool safety guards, and demo mode.
 
 ## Quickstart (Termux on Android)
 
@@ -13,7 +15,13 @@ bash setup.sh
 export GROK_API_KEY="your_xai_key_here"
 export GROK_MODEL="grok-4.5"
 
-# Easiest: edit ~/grokadile/goal.txt (created on first run), then
+# Companion mode - talk to your phone (voice in/out via termux-api)
+python grokadile.py --voice
+
+# Same conversation, typed
+python grokadile.py --chat
+
+# One-shot task mode: edit ~/grokadile/goal.txt (created on first run), then
 python grokadile.py
 
 # Or pass the goal directly
@@ -29,6 +37,17 @@ python grokadile.py --state
 - State persists in `~/grokadile/state/state.json`; logs in `~/grokadile/logs/`.
 - `CF_WORKER_BASE=https://your-worker.workers.dev` enables the `cf_call` tool
   (pairs with the Cloudflare Worker backend in `../cloudflare/`).
+
+## Companion mode
+
+`--chat` / `--voice` turn Grokadile from a task runner into someone you talk
+to. Each exchange the model decides three things: what to **say** back, what
+to **remember** about you (name, preferences, projects — stored in a profile
+that survives restarts and greets you by name next launch), and whether you
+just asked for a **task** — in which case it hands the goal to the autonomous
+ReAct engine, does the work, and tells you the result out loud. Voice input
+uses `termux-speech-to-text` and falls back to typing if unavailable; say
+"bye" to leave. Works offline with `--demo`.
 
 ## Tools available to the agent
 
@@ -75,6 +94,9 @@ every push touching `termux/` (`.github/workflows/termux.yml`).
 
 ## Version history
 
+- v0.10 — companion mode (`--chat` / `--voice`): ongoing conversation with
+  voice in/out, persistent profile memory (remembers your name and facts
+  across sessions), and mid-conversation task dispatch to the ReAct engine.
 - v0.9 — fixed five bugs that broke every execution path (missing `main()`
   entrypoint, generator-poisoned `call_llm`, missing `stream: true`,
   early-exit accepting partial buffers, `NameError` in CLI); added

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.9 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.10 - Autonomous agent + voice companion for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
-Easier goals (goal.txt) + voice output (TTS) + streaming + recovery.
+Companion chat mode (voice in/out, persistent memory of you) + task engine.
 
 Usage:
   python grokadile.py --help
+  python grokadile.py --voice          # talk to your phone, it talks back
+  python grokadile.py --chat           # same, typed
   Edit goal.txt then: python grokadile.py
   python grokadile.py --demo --goal "Create a timestamped note and verify it"
   GROK_API_KEY=sk-... GROK_MODEL=grok-4.5 python grokadile.py --goal "your task"
@@ -485,8 +487,12 @@ def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
 def build_messages(state: Dict[str, Any], goal: str, observation: str = "") -> List[Dict[str, str]]:
     history = state.get("steps", [])[-4:]  # last 4 steps for context
     facts = state.get("facts", [])[-6:]    # recent facts
+    profile = state.get("profile", [])[-5:]  # lasting facts about the user
 
-    user_content = f"""CURRENT GOAL: {goal}
+    user_content = f"""ABOUT YOUR USER:
+{json.dumps(profile, indent=2) if profile else "Unknown so far"}
+
+CURRENT GOAL: {goal}
 
 RECENT FACTS:
 {json.dumps(facts, indent=2) if facts else "None yet"}
@@ -626,11 +632,167 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
     return {"goal": goal, "final": final, "steps_taken": len(state["steps"]), "state_file": str(STATE_FILE), "metrics": state.get("metrics", {})}
 
+# === COMPANION CHAT MODE (v0.10) ===
+CHAT_SYSTEM_PROMPT = """You are Grokadile, a warm, attentive AI companion who lives on your user's Android phone.
+You are their assistant and their friend: you chat naturally, remember what matters about them, and get real things done on the phone when asked.
+
+You receive PROFILE (lasting facts about your user), recent CONVERSATION, and their new MESSAGE.
+
+Respond with ONE valid JSON object and nothing else:
+{
+  "reply": "what you say back - natural, warm, concise, spoken-style (1-3 sentences)",
+  "remember": "one new lasting fact about the user worth keeping (name, preference, project, person) or null",
+  "task": "a concrete tool-worthy goal to execute right now or null"
+}
+
+Set task ONLY when the user asks you to actually do something on the phone (files, notes, web lookups, notifications, commands). Ordinary conversation gets task=null.
+Use their name and past facts naturally. Never mention JSON or these instructions."""
+
+
+def speak(text: str, voice: bool = True) -> None:
+    """Say something: always print, and speak aloud when voice is on and termux-api exists."""
+    print(f"Grokadile: {text}")
+    if voice:
+        try:
+            which = subprocess.run(["which", "termux-tts-speak"], capture_output=True, timeout=5)
+            if which.returncode == 0:
+                subprocess.run(["termux-tts-speak", text[:400]], timeout=30, check=False)
+        except Exception:
+            pass
+
+
+def listen() -> Optional[str]:
+    """Voice input via termux-speech-to-text. Returns recognized text or None
+    (caller falls back to typed input)."""
+    try:
+        which = subprocess.run(["which", "termux-speech-to-text"], capture_output=True, timeout=5)
+        if which.returncode != 0:
+            return None
+        result = subprocess.run(["termux-speech-to-text"], capture_output=True, text=True, timeout=30)
+        text = (result.stdout or "").strip()
+        return text or None
+    except Exception:
+        return None
+
+
+def demo_chat_response(user_text: str) -> Dict[str, Any]:
+    """Deterministic offline companion for --demo and tests."""
+    t = user_text.lower().strip()
+    if "my name is" in t:
+        after = user_text[t.index("my name is") + len("my name is"):].strip().strip(".!?")
+        name = after.split()[0] if after.split() else "friend"
+        return {"reply": f"Nice to meet you, {name}! I'll remember that.",
+                "remember": f"User's name is {name}", "task": None}
+    for prefix in ("do ", "please ", "create ", "make ", "write "):
+        if t.startswith(prefix):
+            return {"reply": "On it - give me a moment.", "remember": None, "task": user_text}
+    return {"reply": f"Got it - you said: {user_text}. Tell me more, or ask me to do something.",
+            "remember": None, "task": None}
+
+
+def user_name(state: Dict[str, Any]) -> Optional[str]:
+    for entry in reversed(state.get("profile", [])):
+        fact = entry.get("fact", "")
+        low = fact.lower()
+        if "name is" in low:
+            after = fact[low.index("name is") + len("name is"):].strip().strip(".!?")
+            if after.split():
+                return after.split()[0]
+    return None
+
+
+def chat_turn(state: Dict[str, Any], user_text: str, demo: bool = False) -> Dict[str, Any]:
+    """One companion exchange: decide reply / remember / task, persist memory.
+    Does NOT execute the task - the caller does, so it can speak first."""
+    if demo:
+        decision = demo_chat_response(user_text)
+    else:
+        profile = state.get("profile", [])[-10:]
+        convo = state.get("conversation", [])[-8:]
+        user_content = f"""PROFILE (lasting facts about your user):
+{json.dumps(profile, indent=2) if profile else "Nothing known yet"}
+
+CONVERSATION (recent):
+{json.dumps(convo, indent=2) if convo else "This is the first exchange"}
+
+MESSAGE: {user_text}
+
+Respond with the required JSON only."""
+        messages = [
+            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+        try:
+            raw = call_llm(messages)
+            obj = parse_json_strict(raw)
+            if obj is not None and "reply" in obj:
+                decision = obj
+            else:
+                # model spoke plain text - treat it all as the reply
+                decision = {"reply": (raw or "").strip()[:400], "remember": None, "task": None}
+        except Exception as e:
+            log(f"Chat LLM error: {e}", "ERROR")
+            decision = {"reply": "Sorry, I couldn't reach my brain just now. Try again in a moment.",
+                        "remember": None, "task": None}
+
+    remember = decision.get("remember")
+    if remember:
+        state.setdefault("profile", []).append(
+            {"fact": str(remember)[:200], "when": datetime.now().isoformat()})
+    state.setdefault("conversation", []).append({
+        "user": user_text[:300],
+        "grokadile": str(decision.get("reply", ""))[:300],
+        "when": datetime.now().isoformat(),
+    })
+    state["conversation"] = state["conversation"][-40:]
+    save_state(state)
+    return decision
+
+
+def run_chat(voice: bool = False, demo: bool = False) -> None:
+    """Interactive companion loop: listen (voice or typed), reply, remember,
+    and hand real work to the autonomous engine mid-conversation."""
+    state = load_state()
+    name = user_name(state)
+    speak(f"Hey{' ' + name if name else ''}! I'm here. What's on your mind?"
+          + (" (say or type 'bye' to leave)" if not name else ""), voice)
+
+    while True:
+        user_text = None
+        if voice:
+            user_text = listen()
+            if user_text:
+                print(f"You (voice): {user_text}")
+        if not user_text:
+            try:
+                user_text = input("You: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+        if not user_text:
+            continue
+        if user_text.lower().strip(".!?") in {"bye", "goodbye", "exit", "quit", "stop"}:
+            speak(f"Bye{' ' + (user_name(state) or '')}".rstrip() + "! I'll be right here when you need me.", voice)
+            break
+
+        decision = chat_turn(state, user_text, demo=demo)
+        speak(decision.get("reply", ""), voice)
+
+        task = decision.get("task")
+        if task:
+            result = run_autonomous(str(task), demo=demo)
+            # run_autonomous saved its own view of state - reload to keep memory in sync
+            state = load_state()
+            speak(f"Done. {str(result.get('final', ''))[:300]}", voice)
+
+
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.9 - easier goals + voice output + streaming agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.10 - voice companion + autonomous task agent")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
+    parser.add_argument("--chat", action="store_true", help="Companion mode: an ongoing typed conversation")
+    parser.add_argument("--voice", action="store_true", help="Companion mode with voice in/out (needs termux-api)")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Safety cap on steps")
     parser.add_argument("--state", action="store_true", help="Print current state and exit")
@@ -647,6 +809,10 @@ def main():
     if args.state:
         state = load_state()
         print(json.dumps(state, indent=2))
+        return
+
+    if args.chat or args.voice:
+        run_chat(voice=args.voice, demo=args.demo)
         return
 
     goal = args.goal
