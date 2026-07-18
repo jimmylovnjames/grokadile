@@ -1,4 +1,4 @@
-# Grokadile Termux Core (v0.13)
+# Grokadile Termux Core (v0.14)
 
 Your phone as a person. Single-file AI companion + autonomous agent for
 Android (Termux) + Grok 4.5 (or any OpenAI-compatible LLM endpoint):
@@ -54,6 +54,14 @@ just asked for a **task** — in which case it hands the goal to the autonomous
 ReAct engine, does the work, and tells you the result out loud. Voice input
 uses `termux-speech-to-text` and falls back to typing if unavailable; say
 "bye" to leave. Works offline with `--demo`.
+
+Memory has three layers, like a person's: **profile** (lasting facts —
+permanent, synced across devices), **journal** (first-person recollections
+of older conversations), and the recent **conversation** window. When the
+conversation grows past `GROKADILE_REFLECT_TURNS` (default 30), the oldest
+turns are reflected into a journal memory plus any lasting facts, so the
+gist of your shared history survives even as the transcript rolls off.
+Journal memories inform both replies and proactive check-ins.
 
 ## Always there (daemon mode)
 
@@ -161,6 +169,9 @@ every push touching `termux/` (`.github/workflows/termux.yml`).
 
 ## Version history
 
+- v0.14 — long-term memory: reflection folds old conversation turns into
+  first-person journal memories (+ lasting facts), which feed replies and
+  check-ins; failed reflections retry rather than losing turns.
 - v0.13 — remote reach: the daemon polls the worker's task queue, answers
   messages sent from any device (`payload.message` or `title`), executes
   implied work, and reports the outcome back to `/agents/:id/report`.

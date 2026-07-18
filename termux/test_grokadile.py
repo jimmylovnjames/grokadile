@@ -309,6 +309,69 @@ class TestSharedMemory(GrokadileTestCase):
         self.assertEqual(len(state["profile"]), 1)  # local memory untouched
 
 
+def fake_turns(n):
+    return [{"user": f"msg {i}", "grokadile": f"reply {i}",
+             "when": f"2026-07-{10 + i % 5:02d}T12:00:00"} for i in range(n)]
+
+
+class TestReflection(GrokadileTestCase):
+    def test_noop_below_threshold(self):
+        state = grokadile.load_state()
+        state["conversation"] = fake_turns(grokadile.REFLECT_AFTER_TURNS - 1)
+        self.assertIsNone(grokadile.reflect(state, demo=True))
+        self.assertEqual(len(state["conversation"]), grokadile.REFLECT_AFTER_TURNS - 1)
+
+    def test_demo_reflection_compresses_turns_into_journal(self):
+        state = grokadile.load_state()
+        state["conversation"] = fake_turns(grokadile.REFLECT_AFTER_TURNS)
+        memory = grokadile.reflect(state, demo=True)
+        self.assertIsNotNone(memory)
+        persisted = grokadile.load_state()
+        self.assertEqual(len(persisted["journal"]), 1)
+        self.assertEqual(persisted["journal"][0]["turns"], grokadile.REFLECT_BATCH)
+        self.assertEqual(len(persisted["conversation"]),
+                         grokadile.REFLECT_AFTER_TURNS - grokadile.REFLECT_BATCH)
+
+    def test_llm_reflection_keeps_lasting_facts(self):
+        MockLLMHandler.decisions = [
+            {"summary": "We planned the crocodile app together.",
+             "facts": ["User is building a crocodile app"]},
+        ]
+        state = grokadile.load_state()
+        state["conversation"] = fake_turns(grokadile.REFLECT_AFTER_TURNS)
+        memory = grokadile.reflect(state, demo=False)
+        self.assertEqual(memory, "We planned the crocodile app together.")
+        persisted = grokadile.load_state()
+        self.assertIn("User is building a crocodile app",
+                      [f["fact"] for f in persisted["profile"]])
+
+    def test_failed_reflection_keeps_turns_for_retry(self):
+        MockLLMHandler.decisions = ["not json at all"]
+        state = grokadile.load_state()
+        state["conversation"] = fake_turns(grokadile.REFLECT_AFTER_TURNS)
+        self.assertIsNone(grokadile.reflect(state, demo=False))
+        self.assertEqual(len(state["conversation"]), grokadile.REFLECT_AFTER_TURNS)
+        self.assertEqual(state.get("journal", []), [])
+
+    def test_chat_turn_triggers_reflection(self):
+        state = grokadile.load_state()
+        state["conversation"] = fake_turns(grokadile.REFLECT_AFTER_TURNS - 1)
+        grokadile.chat_turn(state, "hello", demo=True)  # pushes past threshold
+        persisted = grokadile.load_state()
+        self.assertEqual(len(persisted["journal"]), 1)
+
+    def test_journal_reaches_chat_prompt(self):
+        MockLLMHandler.decisions = [
+            {"reply": "of course I remember", "remember": None, "task": None},
+        ]
+        state = grokadile.load_state()
+        state["journal"] = [{"memory": "We fixed the streaming bug together.",
+                             "turns": 20, "when": "2026-07-17T12:00:00"}]
+        grokadile.chat_turn(state, "remember that bug?", demo=False)
+        prompt = MockLLMHandler.payloads[0]["messages"][1]["content"]
+        self.assertIn("We fixed the streaming bug together.", prompt)
+
+
 DAYTIME = __import__("datetime").datetime(2026, 7, 18, 14, 0)   # 2pm, not quiet
 NIGHTTIME = __import__("datetime").datetime(2026, 7, 18, 23, 30)  # in quiet hours
 

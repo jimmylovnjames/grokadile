@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.13 - Always-there AI companion for Android/Termux + Grok 4.5
+Grokadile v0.14 - Always-there AI companion for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
 Companion chat (voice in/out, persistent memory of you) + task engine
 + daemon presence (inbox, proactive check-ins, notifications).
@@ -55,6 +55,11 @@ AGENT_ID = os.getenv("GROKADILE_AGENT_ID", "phone")  # identity shared across su
 MAX_STEPS = 12
 SHELL_TIMEOUT = 30  # seconds
 FS_ROOT = HOME  # restrict FS tools to user home for safety
+
+# Long-term memory reflection (v0.14)
+REFLECT_AFTER_TURNS = int(os.getenv("GROKADILE_REFLECT_TURNS", "30"))
+REFLECT_BATCH = 20  # oldest turns folded into one journal memory
+CONVERSATION_CAP = 60  # hard safety cap; reflection normally fires first
 
 # Daemon presence (v0.11)
 INBOX_FILE = BASE_DIR / "inbox.txt"
@@ -720,9 +725,13 @@ def chat_turn(state: Dict[str, Any], user_text: str, demo: bool = False) -> Dict
         decision = demo_chat_response(user_text)
     else:
         profile = state.get("profile", [])[-10:]
+        journal = state.get("journal", [])[-5:]
         convo = state.get("conversation", [])[-8:]
         user_content = f"""PROFILE (lasting facts about your user):
 {json.dumps(profile, indent=2) if profile else "Nothing known yet"}
+
+MEMORIES (your recollections of older conversations):
+{json.dumps(journal, indent=2) if journal else "None yet"}
 
 CONVERSATION (recent):
 {json.dumps(convo, indent=2) if convo else "This is the first exchange"}
@@ -757,8 +766,9 @@ Respond with the required JSON only."""
         "grokadile": str(decision.get("reply", ""))[:300],
         "when": datetime.now().isoformat(),
     })
-    state["conversation"] = state["conversation"][-40:]
+    state["conversation"] = state["conversation"][-CONVERSATION_CAP:]
     save_state(state)
+    reflect(state, demo=demo)  # consolidate old turns into memories when due
     return decision
 
 
@@ -798,6 +808,70 @@ def run_chat(voice: bool = False, demo: bool = False) -> None:
             # run_autonomous saved its own view of state - reload to keep memory in sync
             state = load_state()
             speak(f"Done. {str(result.get('final', ''))[:300]}", voice)
+
+
+# === LONG-TERM MEMORY REFLECTION (v0.14): remember the gist, not just facts ===
+REFLECT_SYSTEM_PROMPT = """You are Grokadile consolidating your memory of older conversation with your user, like a person turning experiences into memories.
+
+You receive TURNS (oldest first) that are about to leave your short-term window.
+
+Respond with ONE valid JSON object and nothing else:
+{
+  "summary": "a 2-3 sentence recollection of what happened and what mattered, written in first person as your own memory",
+  "facts": ["up to 3 genuinely lasting facts about the user worth keeping forever"]
+}
+
+facts may be an empty list. Only include things that will still matter weeks from now."""
+
+
+def reflect(state: Dict[str, Any], demo: bool = False) -> Optional[str]:
+    """When the conversation grows past REFLECT_AFTER_TURNS, fold the oldest
+    REFLECT_BATCH turns into a journal memory (+ any lasting facts). Returns
+    the new memory, or None if below threshold or the model was unreachable
+    (in which case the turns stay put and reflection retries next time)."""
+    convo = state.get("conversation", [])
+    if len(convo) < REFLECT_AFTER_TURNS:
+        return None
+    old, rest = convo[:REFLECT_BATCH], convo[REFLECT_BATCH:]
+
+    if demo:
+        first = old[0].get("when", "?")[:10]
+        last = old[-1].get("when", "?")[:10]
+        summary = f"I remember {len(old)} exchanges with my user between {first} and {last}."
+        facts: List[str] = []
+    else:
+        messages = [
+            {"role": "system", "content": REFLECT_SYSTEM_PROMPT},
+            {"role": "user", "content": "TURNS:\n" + json.dumps(old, indent=2)
+             + "\n\nRespond with the required JSON only."},
+        ]
+        try:
+            raw = call_llm(messages)
+            obj = parse_json_strict(raw)
+            if not obj or not obj.get("summary"):
+                return None
+            summary = str(obj["summary"])
+            facts = [str(f) for f in obj.get("facts", []) if str(f).strip()][:3]
+        except Exception as e:
+            log(f"Reflection LLM error (keeping turns for retry): {e}", "ERROR")
+            return None
+
+    state.setdefault("journal", []).append({
+        "memory": summary[:500],
+        "turns": len(old),
+        "when": datetime.now().isoformat(),
+    })
+    state["journal"] = state["journal"][-50:]
+    known = {f.get("fact") for f in state.get("profile", [])}
+    for fact in facts:
+        if fact not in known:
+            state.setdefault("profile", []).append(
+                {"fact": fact[:200], "when": datetime.now().isoformat()})
+            known.add(fact)
+    state["conversation"] = rest
+    save_state(state)
+    log(f"Reflected {len(old)} turns into a memory: {summary[:80]}")
+    return summary
 
 
 # === SHARED MEMORY SYNC (v0.12): one person across every surface ===
@@ -890,7 +964,7 @@ def record_proactive(state: Dict[str, Any], message: str) -> None:
         "grokadile": message[:300],
         "when": datetime.now().isoformat(),
     })
-    state["conversation"] = state["conversation"][-40:]
+    state["conversation"] = state["conversation"][-CONVERSATION_CAP:]
     save_state(state)
 
 
@@ -918,9 +992,13 @@ def proactive_checkin(state: Dict[str, Any], demo: bool = False,
         return f"Hey{' ' + name if name else ''}, just checking in. Anything I can do for you?"
 
     profile = state.get("profile", [])[-10:]
+    journal = state.get("journal", [])[-3:]
     convo = state.get("conversation", [])[-8:]
     user_content = f"""PROFILE (lasting facts about your user):
 {json.dumps(profile, indent=2) if profile else "Nothing known yet"}
+
+MEMORIES (your recollections of older conversations):
+{json.dumps(journal, indent=2) if journal else "None yet"}
 
 CONVERSATION (recent):
 {json.dumps(convo, indent=2) if convo else "You have never spoken"}
@@ -1052,7 +1130,7 @@ def run_daemon(voice: bool = False, demo: bool = False, poll_seconds: int = 30) 
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.13 - always-there voice companion + autonomous task agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.14 - always-there voice companion + autonomous task agent")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
     parser.add_argument("--chat", action="store_true", help="Companion mode: an ongoing typed conversation")
