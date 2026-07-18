@@ -27,3 +27,13 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_agent_time
     ON reports (agent_id, created_at);
+
+-- Shared profile memory: lasting facts about the user, unioned across
+-- devices so every surface talks to the same "person".
+CREATE TABLE IF NOT EXISTS memory (
+    agent_id   TEXT NOT NULL,
+    fact       TEXT NOT NULL,
+    learned_at TEXT NOT NULL,     -- ISO timestamp from the device that learned it
+    created_at INTEGER NOT NULL,  -- server receive time
+    PRIMARY KEY (agent_id, fact)
+);

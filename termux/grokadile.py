@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.11 - Always-there AI companion for Android/Termux + Grok 4.5
+Grokadile v0.12 - Always-there AI companion for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
 Companion chat (voice in/out, persistent memory of you) + task engine
 + daemon presence (inbox, proactive check-ins, notifications).
@@ -49,6 +49,8 @@ DEFAULT_API_BASE = os.getenv("XAI_API_BASE", "https://api.x.ai/v1")
 DEFAULT_MODEL = os.getenv("GROK_MODEL", "grok-4.5")
 API_KEY = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY")
 CF_BASE = os.getenv("CF_WORKER_BASE", "")  # e.g. https://your-worker.workers.dev for Cloudflare tool
+CF_TOKEN = os.getenv("CF_AUTH_TOKEN", "")  # worker APP_AUTH_TOKEN, if configured
+AGENT_ID = os.getenv("GROKADILE_AGENT_ID", "phone")  # identity shared across surfaces
 
 MAX_STEPS = 12
 SHELL_TIMEOUT = 30  # seconds
@@ -749,6 +751,7 @@ Respond with the required JSON only."""
     if remember:
         state.setdefault("profile", []).append(
             {"fact": str(remember)[:200], "when": datetime.now().isoformat()})
+        sync_profile(state, pull=False)  # share the new fact; no-op offline
     state.setdefault("conversation", []).append({
         "user": user_text[:300],
         "grokadile": str(decision.get("reply", ""))[:300],
@@ -763,6 +766,7 @@ def run_chat(voice: bool = False, demo: bool = False) -> None:
     """Interactive companion loop: listen (voice or typed), reply, remember,
     and hand real work to the autonomous engine mid-conversation."""
     state = load_state()
+    sync_profile(state)  # pick up what other surfaces have learned about you
     name = user_name(state)
     speak(f"Hey{' ' + name if name else ''}! I'm here. What's on your mind?"
           + (" (say or type 'bye' to leave)" if not name else ""), voice)
@@ -794,6 +798,42 @@ def run_chat(voice: bool = False, demo: bool = False) -> None:
             # run_autonomous saved its own view of state - reload to keep memory in sync
             state = load_state()
             speak(f"Done. {str(result.get('final', ''))[:300]}", voice)
+
+
+# === SHARED MEMORY SYNC (v0.12): one person across every surface ===
+def sync_profile(state: Dict[str, Any], push: bool = True, pull: bool = True) -> str:
+    """Union-merge the local profile with the Cloudflare worker's memory store,
+    so every device talking to the same worker shares one identity. Best-effort:
+    offline or unconfigured just means staying local."""
+    if not CF_BASE:
+        return "SKIP: CF_WORKER_BASE not set"
+    url = f"{CF_BASE.rstrip('/')}/agents/{AGENT_ID}/memory"
+    headers = {"User-Agent": "Grokadile/0.12"}
+    if CF_TOKEN:
+        headers["Authorization"] = f"Bearer {CF_TOKEN}"
+    try:
+        if push and state.get("profile"):
+            requests.put(url, json={"facts": state["profile"][-50:]},
+                         headers=headers, timeout=15).raise_for_status()
+        if pull:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            remote = resp.json().get("facts", [])
+            known = {f.get("fact") for f in state.get("profile", [])}
+            added = 0
+            for entry in remote:
+                fact = entry.get("fact")
+                if fact and fact not in known:
+                    state.setdefault("profile", []).append(
+                        {"fact": fact, "when": entry.get("when", datetime.now().isoformat())})
+                    known.add(fact)
+                    added += 1
+            if added:
+                save_state(state)
+        return f"OK: profile synced ({len(state.get('profile', []))} facts)"
+    except Exception as e:
+        log(f"Profile sync failed (staying local): {e}", "WARN")
+        return f"ERROR: {e}"
 
 
 # === DAEMON PRESENCE (v0.11): inbox, proactive check-ins, always-on loop ===
@@ -936,6 +976,7 @@ def run_daemon(voice: bool = False, demo: bool = False, poll_seconds: int = 30) 
     log(f"Daemon started (poll={poll_seconds}s, checkin>={CHECKIN_MINUTES}min, "
         f"quiet {QUIET_START}:00-{QUIET_END}:00). Queue messages with --tell.")
     state = load_state()
+    sync_profile(state)
     while True:
         try:
             daemon_tick(state, demo=demo, voice=voice)
@@ -946,7 +987,7 @@ def run_daemon(voice: bool = False, demo: bool = False, poll_seconds: int = 30) 
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.11 - always-there voice companion + autonomous task agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.12 - always-there voice companion + autonomous task agent")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
     parser.add_argument("--chat", action="store_true", help="Companion mode: an ongoing typed conversation")

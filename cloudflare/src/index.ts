@@ -4,8 +4,9 @@ import { bearerAuth } from './auth';
 import { proxyChat } from './grok';
 import { pullTasks, enqueueTask } from './tasks';
 import { postReport } from './reports';
+import { getMemory, putMemory } from './memory';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -23,6 +24,10 @@ app.post('/v1/chat/completions', proxyChat);
 app.get('/agents/:agentId/tasks', pullTasks);
 app.post('/agents/:agentId/tasks', enqueueTask);
 app.post('/agents/:agentId/report', postReport);
+
+// Shared memory: the same "person" across every device and surface.
+app.get('/agents/:agentId/memory', getMemory);
+app.put('/agents/:agentId/memory', putMemory);
 
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
 app.onError((err, c) => {

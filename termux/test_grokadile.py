@@ -34,6 +34,38 @@ class MockLLMHandler(BaseHTTPRequestHandler):
     decisions = []
     calls = 0
     payloads = []
+    memory = {}  # agent_id -> [{fact, when}] — mimics the worker's union store
+
+    def _agent_id(self):
+        return self.path.split("/agents/")[1].split("/")[0]
+
+    def _send_json(self, obj):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(obj).encode())
+
+    def do_GET(self):
+        if "/memory" in self.path:
+            self._send_json({"facts": MockLLMHandler.memory.get(self._agent_id(), [])})
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_PUT(self):
+        if "/memory" in self.path:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            store = MockLLMHandler.memory.setdefault(self._agent_id(), [])
+            known = {f["fact"] for f in store}
+            for entry in body.get("facts", []):
+                fact = entry.get("fact") if isinstance(entry, dict) else None
+                if fact and fact not in known:
+                    store.append({"fact": fact, "when": entry.get("when", "")})
+                    known.add(fact)
+            self._send_json({"received": len(body.get("facts", []))})
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def do_POST(self):
         cls = MockLLMHandler
@@ -83,6 +115,8 @@ class GrokadileTestCase(unittest.TestCase):
         MockLLMHandler.decisions = []
         MockLLMHandler.calls = 0
         MockLLMHandler.payloads = []
+        MockLLMHandler.memory = {}
+        grokadile.CF_BASE = ""  # sync stays local unless a test opts in
 
 
 class TestParsing(GrokadileTestCase):
@@ -214,6 +248,53 @@ class TestChatCompanion(GrokadileTestCase):
         state["profile"] = [{"fact": "User's name is Jimmy", "when": "now"}]
         messages = grokadile.build_messages(state, "some goal")
         self.assertIn("User's name is Jimmy", messages[1]["content"])
+
+
+class TestSharedMemory(GrokadileTestCase):
+    def _enable_cf(self):
+        grokadile.CF_BASE = grokadile.DEFAULT_API_BASE.rsplit("/v1", 1)[0]
+
+    def test_sync_skips_when_unconfigured(self):
+        state = grokadile.load_state()
+        self.assertTrue(grokadile.sync_profile(state).startswith("SKIP"))
+
+    def test_sync_unions_local_and_remote(self):
+        self._enable_cf()
+        MockLLMHandler.memory["phone"] = [
+            {"fact": "User likes crocodiles", "when": "2026-07-18T10:00:00"},
+        ]
+        state = grokadile.load_state()
+        state["profile"] = [{"fact": "User's name is Jimmy", "when": "2026-07-18T09:00:00"}]
+        result = grokadile.sync_profile(state)
+        self.assertTrue(result.startswith("OK"), result)
+        local_facts = {f["fact"] for f in grokadile.load_state()["profile"]}
+        remote_facts = {f["fact"] for f in MockLLMHandler.memory["phone"]}
+        expected = {"User's name is Jimmy", "User likes crocodiles"}
+        self.assertEqual(local_facts, expected)
+        self.assertEqual(remote_facts, expected)
+
+    def test_sync_is_idempotent(self):
+        self._enable_cf()
+        state = grokadile.load_state()
+        state["profile"] = [{"fact": "User's name is Jimmy", "when": "now"}]
+        grokadile.sync_profile(state)
+        grokadile.sync_profile(state)
+        self.assertEqual(len(MockLLMHandler.memory["phone"]), 1)
+        self.assertEqual(len(state["profile"]), 1)
+
+    def test_remember_pushes_to_shared_memory(self):
+        self._enable_cf()
+        state = grokadile.load_state()
+        grokadile.chat_turn(state, "My name is Jimmy.", demo=True)
+        remote_facts = [f["fact"] for f in MockLLMHandler.memory.get("phone", [])]
+        self.assertIn("User's name is Jimmy", remote_facts)
+
+    def test_sync_survives_unreachable_worker(self):
+        grokadile.CF_BASE = "http://127.0.0.1:1"  # nothing listens here
+        state = grokadile.load_state()
+        state["profile"] = [{"fact": "User's name is Jimmy", "when": "now"}]
+        self.assertTrue(grokadile.sync_profile(state).startswith("ERROR"))
+        self.assertEqual(len(state["profile"]), 1)  # local memory untouched
 
 
 DAYTIME = __import__("datetime").datetime(2026, 7, 18, 14, 0)   # 2pm, not quiet

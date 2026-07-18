@@ -19,6 +19,8 @@ Built with [Hono](https://hono.dev) + [D1](https://developers.cloudflare.com/d1/
 | GET  | `/agents/:agentId/tasks` | bearer | Pull pending tasks (marks them DELIVERED) |
 | POST | `/agents/:agentId/tasks` | bearer | Enqueue a task: `{ title, payload?, priority? }` |
 | POST | `/agents/:agentId/report` | bearer | Record activity: `{ status, task_id?, detail?, timestamp? }` |
+| GET  | `/agents/:agentId/memory` | bearer | Shared profile memory: `{ facts: [{ fact, when }] }` |
+| PUT  | `/agents/:agentId/memory` | bearer | Union-merge facts pushed by a device (duplicates ignored) |
 
 Protected routes require `Authorization: Bearer <APP_AUTH_TOKEN>`. If
 `APP_AUTH_TOKEN` is unset the worker runs open (local dev only).

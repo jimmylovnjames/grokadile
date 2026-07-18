@@ -1,4 +1,4 @@
-# Grokadile Termux Core (v0.11)
+# Grokadile Termux Core (v0.12)
 
 Your phone as a person. Single-file AI companion + autonomous agent for
 Android (Termux) + Grok 4.5 (or any OpenAI-compatible LLM endpoint):
@@ -37,7 +37,12 @@ python grokadile.py --state
 
 - State persists in `~/grokadile/state/state.json`; logs in `~/grokadile/logs/`.
 - `CF_WORKER_BASE=https://your-worker.workers.dev` enables the `cf_call` tool
-  (pairs with the Cloudflare Worker backend in `../cloudflare/`).
+  and **shared memory sync** (pairs with the Worker in `../cloudflare/`):
+  on chat/daemon start and whenever a new fact is learned, the local profile
+  is union-merged with the worker's memory store, so every device or surface
+  using the same worker talks to the same "person". Optional:
+  `CF_AUTH_TOKEN` (worker bearer token), `GROKADILE_AGENT_ID` (identity key,
+  default `phone`). Offline or unconfigured simply stays local.
 
 ## Companion mode
 
@@ -136,6 +141,9 @@ every push touching `termux/` (`.github/workflows/termux.yml`).
 
 ## Version history
 
+- v0.12 — shared brain: profile memory union-synced through the Cloudflare
+  Worker (`/agents/:id/memory`), so phone, daemon, and any other surface
+  share one identity; best-effort and fully offline-safe.
 - v0.11 — always-there presence: `--daemon` (inbox watching, wake lock,
   notification replies), `--tell` message queue, LLM-driven proactive
   check-ins with quiet hours + rate limiting, `--checkin` one-shot mode
