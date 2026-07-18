@@ -1,9 +1,22 @@
 # Grokadile
 
-A Grok-powered autonomous Android agent platform. Grokadile runs a queue of
-agent "tasks" on-device through a persistent foreground service, talks to the
-Grok (xAI) API directly or via a Cloudflare Worker proxy, and is built to be
-extended with new agent logic by adding a single class.
+Your phone as a person: a Grok-powered AI companion + autonomous agent
+platform for Android. Talk to it out loud, it talks back, remembers you,
+stays present in the background, reaches out on its own, does real work on
+the phone mid-conversation, and can be messaged from anywhere on the
+internet — one identity shared across every surface.
+
+## Components
+
+| Directory | What it is | CI |
+|---|---|---|
+| `termux/` | The companion engine: single-file Python agent for Termux — voice chat, three-layer memory (profile / journal / conversation), always-on daemon, proactive check-ins, ReAct task loop with 13 tools | `termux.yml` |
+| `cloudflare/` | Worker backend: Grok API proxy (key stays server-side), task queue for remote messaging, reports, and the shared memory store | `worker.yml` |
+| `app/` | Kotlin/Compose Android app: persistent foreground service, task queue, pluggable agent runtime | `build.yml` |
+
+The fastest way to *meet* Grokadile is the Termux core — see
+[`termux/README.md`](termux/README.md). The sections below describe the
+Android app.
 
 ## Architecture
 
