@@ -34,7 +34,8 @@ npm install
 # 1. Create the D1 database, then paste the printed database_id into wrangler.toml
 npx wrangler d1 create grokadile
 
-# 2. Apply the schema (local + remote)
+# 2. Apply the schema (local + remote). Idempotent - rerun it after pulling
+#    updates that add tables (e.g. the shared `memory` table).
 npm run db:init:local
 npm run db:init
 

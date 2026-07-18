@@ -1,4 +1,4 @@
-# Grokadile Termux Core (v0.12)
+# Grokadile Termux Core (v0.13)
 
 Your phone as a person. Single-file AI companion + autonomous agent for
 Android (Termux) + Grok 4.5 (or any OpenAI-compatible LLM endpoint):
@@ -96,6 +96,26 @@ cron or `termux-job-scheduler` — it makes one proactive decision and exits
 termux-job-scheduler --script ~/grokadile/termux/checkin.sh --period-ms 900000
 ```
 
+## Reach your phone from anywhere
+
+With `CF_WORKER_BASE` set, the daemon also polls the worker's task queue, so
+anything that can reach the worker can message your phone-person — laptop,
+cron job, another agent:
+
+```bash
+# from anywhere on the internet
+curl -X POST https://your-worker.workers.dev/agents/phone/tasks \
+  -H "Authorization: Bearer $CF_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "note", "payload": {"message": "create a note that the deploy finished"}}'
+```
+
+The phone answers it like any conversation turn (notification/voice locally),
+runs any real work it implies, and posts what it said and did back to
+`/agents/phone/report` so the sender can see the outcome. The `payload.message`
+field is the message; `title` is the fallback. Each queued message is
+delivered exactly once (the worker marks it DELIVERED on pull).
+
 ## Tools available to the agent
 
 | Tool | Purpose |
@@ -141,6 +161,9 @@ every push touching `termux/` (`.github/workflows/termux.yml`).
 
 ## Version history
 
+- v0.13 — remote reach: the daemon polls the worker's task queue, answers
+  messages sent from any device (`payload.message` or `title`), executes
+  implied work, and reports the outcome back to `/agents/:id/report`.
 - v0.12 — shared brain: profile memory union-synced through the Cloudflare
   Worker (`/agents/:id/memory`), so phone, daemon, and any other surface
   share one identity; best-effort and fully offline-safe.

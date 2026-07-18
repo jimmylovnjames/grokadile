@@ -35,6 +35,8 @@ class MockLLMHandler(BaseHTTPRequestHandler):
     calls = 0
     payloads = []
     memory = {}  # agent_id -> [{fact, when}] — mimics the worker's union store
+    remote_tasks = []  # served once then cleared, like the worker's DELIVERED marking
+    reports = []
 
     def _agent_id(self):
         return self.path.split("/agents/")[1].split("/")[0]
@@ -48,6 +50,10 @@ class MockLLMHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if "/memory" in self.path:
             self._send_json({"facts": MockLLMHandler.memory.get(self._agent_id(), [])})
+        elif "/tasks" in self.path:
+            served = MockLLMHandler.remote_tasks
+            MockLLMHandler.remote_tasks = []
+            self._send_json(served)
         else:
             self.send_response(404)
             self.end_headers()
@@ -70,6 +76,10 @@ class MockLLMHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         cls = MockLLMHandler
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if "/report" in self.path:
+            cls.reports.append(body)
+            self._send_json({"ok": True})
+            return
         cls.payloads.append(body)
         idx = min(cls.calls, len(cls.decisions) - 1)
         cls.calls += 1
@@ -116,6 +126,8 @@ class GrokadileTestCase(unittest.TestCase):
         MockLLMHandler.calls = 0
         MockLLMHandler.payloads = []
         MockLLMHandler.memory = {}
+        MockLLMHandler.remote_tasks = []
+        MockLLMHandler.reports = []
         grokadile.CF_BASE = ""  # sync stays local unless a test opts in
 
 
@@ -364,6 +376,42 @@ class TestDaemon(GrokadileTestCase):
         self.assertEqual(summary["messages_handled"], 1)
         # demo ReAct loop ran to completion off the dispatched task
         self.assertGreaterEqual(grokadile.load_state()["metrics"]["finals"], 1)
+
+    def test_tick_answers_remote_messages_and_reports_back(self):
+        grokadile.CF_BASE = grokadile.DEFAULT_API_BASE.rsplit("/v1", 1)[0]
+        MockLLMHandler.remote_tasks = [
+            {"id": "t1", "agent_id": "phone", "title": "My name is Jimmy",
+             "payload": "{}", "priority": "NORMAL"},
+        ]
+        state = grokadile.load_state()
+        state["last_checkin"] = DAYTIME.isoformat()
+        summary = grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        self.assertEqual(summary["messages_handled"], 1)
+        self.assertEqual(grokadile.user_name(grokadile.load_state()), "Jimmy")
+        self.assertEqual(len(MockLLMHandler.reports), 1)
+        self.assertEqual(MockLLMHandler.reports[0]["task_id"], "t1")
+        self.assertEqual(MockLLMHandler.reports[0]["status"], "replied")
+
+    def test_remote_message_can_dispatch_work(self):
+        grokadile.CF_BASE = grokadile.DEFAULT_API_BASE.rsplit("/v1", 1)[0]
+        MockLLMHandler.remote_tasks = [
+            {"id": "t2", "agent_id": "phone", "title": "sent from laptop",
+             "payload": json.dumps({"message": "create a note for me"}),
+             "priority": "HIGH"},
+        ]
+        state = grokadile.load_state()
+        state["last_checkin"] = DAYTIME.isoformat()
+        grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        # payload message beat the title, dispatched real work, reported it
+        self.assertGreaterEqual(grokadile.load_state()["metrics"]["finals"], 1)
+        self.assertIn("SUCCESS", MockLLMHandler.reports[0]["detail"])
+
+    def test_remote_fetch_survives_unreachable_worker(self):
+        grokadile.CF_BASE = "http://127.0.0.1:1"  # nothing listens here
+        state = grokadile.load_state()
+        state["last_checkin"] = DAYTIME.isoformat()
+        summary = grokadile.daemon_tick(state, demo=True, now=DAYTIME)
+        self.assertEqual(summary["messages_handled"], 0)
 
     def test_tick_proactive_checkin_recorded(self):
         state = grokadile.load_state()

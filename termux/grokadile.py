@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.12 - Always-there AI companion for Android/Termux + Grok 4.5
+Grokadile v0.13 - Always-there AI companion for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
 Companion chat (voice in/out, persistent memory of you) + task engine
 + daemon presence (inbox, proactive check-ins, notifications).
@@ -808,9 +808,7 @@ def sync_profile(state: Dict[str, Any], push: bool = True, pull: bool = True) ->
     if not CF_BASE:
         return "SKIP: CF_WORKER_BASE not set"
     url = f"{CF_BASE.rstrip('/')}/agents/{AGENT_ID}/memory"
-    headers = {"User-Agent": "Grokadile/0.12"}
-    if CF_TOKEN:
-        headers["Authorization"] = f"Bearer {CF_TOKEN}"
+    headers = _cf_headers()
     try:
         if push and state.get("profile"):
             requests.put(url, json={"facts": state["profile"][-50:]},
@@ -944,20 +942,87 @@ Respond with the required JSON only."""
         return None
 
 
+def _cf_headers() -> Dict[str, str]:
+    headers = {"User-Agent": "Grokadile/0.13"}
+    if CF_TOKEN:
+        headers["Authorization"] = f"Bearer {CF_TOKEN}"
+    return headers
+
+
+def fetch_remote_messages() -> List[Dict[str, Any]]:
+    """Pull queued messages from the worker's task queue (the worker marks
+    them DELIVERED, so each is handed out once). [] when offline/unset."""
+    if not CF_BASE:
+        return []
+    try:
+        url = f"{CF_BASE.rstrip('/')}/agents/{AGENT_ID}/tasks"
+        resp = requests.get(url, headers=_cf_headers(), timeout=15)
+        resp.raise_for_status()
+        tasks = resp.json()
+        return tasks if isinstance(tasks, list) else []
+    except Exception as e:
+        log(f"Remote inbox fetch failed: {e}", "WARN")
+        return []
+
+
+def post_report(task_id: Optional[str], status: str, detail: str) -> None:
+    """Best-effort report back to the worker so remote senders see the outcome."""
+    if not CF_BASE:
+        return
+    try:
+        url = f"{CF_BASE.rstrip('/')}/agents/{AGENT_ID}/report"
+        requests.post(url, json={"task_id": task_id, "status": status, "detail": detail[:1000]},
+                      headers=_cf_headers(), timeout=15)
+    except Exception as e:
+        log(f"Report post failed: {e}", "WARN")
+
+
+def _remote_message_text(task: Dict[str, Any]) -> str:
+    """A remote task is a message: prefer payload {'message': ...}, else title."""
+    try:
+        payload = json.loads(task.get("payload") or "{}")
+        if isinstance(payload, dict) and payload.get("message"):
+            return str(payload["message"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return str(task.get("title", "")).strip()
+
+
+def handle_message(state: Dict[str, Any], message: str, demo: bool = False,
+                   voice: bool = False) -> str:
+    """Answer one incoming message (local or remote): reply, maybe run a task.
+    Returns everything said, for reporting back to remote senders."""
+    decision = chat_turn(state, message, demo=demo)
+    deliver(decision.get("reply", ""), voice)
+    said = str(decision.get("reply", ""))
+    task = decision.get("task")
+    if task:
+        result = run_autonomous(str(task), demo=demo)
+        state.clear()
+        state.update(load_state())  # resync shared state after the task run
+        outcome = f"Done. {str(result.get('final', ''))[:200]}"
+        deliver(outcome, voice)
+        said = f"{said} {outcome}".strip()
+    return said
+
+
 def daemon_tick(state: Dict[str, Any], demo: bool = False, voice: bool = False,
                 now: Optional[datetime] = None) -> Dict[str, Any]:
-    """One daemon cycle: answer anything in the inbox, then maybe check in."""
+    """One daemon cycle: answer the local inbox, then messages queued at the
+    worker from other devices, then maybe check in."""
     handled = 0
     for message in read_inbox_new(state):
         log(f"Inbox: {message[:80]}")
-        decision = chat_turn(state, message, demo=demo)
-        deliver(decision.get("reply", ""), voice)
-        task = decision.get("task")
-        if task:
-            result = run_autonomous(str(task), demo=demo)
-            state.clear()
-            state.update(load_state())  # resync shared state after the task run
-            deliver(f"Done. {str(result.get('final', ''))[:200]}", voice)
+        handle_message(state, message, demo=demo, voice=voice)
+        handled += 1
+
+    for task in fetch_remote_messages():
+        message = _remote_message_text(task)
+        if not message:
+            continue
+        log(f"Remote: {message[:80]}")
+        said = handle_message(state, message, demo=demo, voice=voice)
+        post_report(task.get("id"), "replied", said)
         handled += 1
 
     checkin = proactive_checkin(state, demo=demo, now=now)
@@ -987,7 +1052,7 @@ def run_daemon(voice: bool = False, demo: bool = False, poll_seconds: int = 30) 
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.12 - always-there voice companion + autonomous task agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.13 - always-there voice companion + autonomous task agent")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
     parser.add_argument("--chat", action="store_true", help="Companion mode: an ongoing typed conversation")
