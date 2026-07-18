@@ -1,49 +1,89 @@
-# Grokadile v0.1
+# Grokadile Termux Core (v0.9)
 
-Autonomous AI agent toolbox for Android (Termux) + Grok 4.5 (or compatible LLM).
-
-**Core module priority (INFERRED from standard reliable agent framework dependencies):**
-
-1. Environment bootstrap + launcher (setup.sh, dirs, deps)
-2. Core autonomous loop + tool dispatch + JSON action parsing (grokadile.py)
-3. Safe tool registry and executors (shell/fs/net with timeouts + path guards)
-4. Persistent memory / state layer (json files + in-prompt retrieval)
-5. Configurable LLM client (Grok API + multi-model fallback + demo mode)
-6. Swarm / multi-agent coordinator hooks (future extension point)
-
-This deliverable implements priorities 1 and 2 as a single runnable package. Higher priorities are stubbed for extension.
+Single-file autonomous AI agent for Android (Termux) + Grok 4.5 (or any
+OpenAI-compatible LLM endpoint). JSON-action ReAct loop with streaming,
+persistent state, tool safety guards, and offline demo mode.
 
 ## Quickstart (Termux on Android)
 
 ```bash
-# On your phone in Termux
-pkg update -y && pkg install -y python git
+pkg update -y && pkg install -y python git termux-api
 cd ~/grokadile/termux   # or copy files
 bash setup.sh
 export GROK_API_KEY="your_xai_key_here"
 export GROK_MODEL="grok-4.5"
-python grokadile.py --goal "List files in current dir and create a test note.txt with timestamp"
+
+# Easiest: edit ~/grokadile/goal.txt (created on first run), then
+python grokadile.py
+
+# Or pass the goal directly
+python grokadile.py --goal "List files in current dir and create a note with today's date"
+
+# Offline demo (no API key) — validates the whole loop
+python grokadile.py --demo --goal "smoke test"
+
+# Inspect persistent state
+python grokadile.py --state
 ```
 
-- Use `--demo` for offline testing (no API key needed, simulates loop).
-- State persists in `state/state.json`.
-- Logs in `logs/`.
-- Edit `grokadile.py` constants for custom paths or add tools.
+- State persists in `~/grokadile/state/state.json`; logs in `~/grokadile/logs/`.
+- `CF_WORKER_BASE=https://your-worker.workers.dev` enables the `cf_call` tool
+  (pairs with the Cloudflare Worker backend in `../cloudflare/`).
 
-## Safety & Notes (GUESSED for Termux constraints)
-- Shell tool runs with 30s timeout, captures output only. Never run destructive cmds without review.
-- FS tools restricted to user-writable paths under $HOME by default.
-- No root. No system modification.
-- API calls use HTTPS; key never logged.
-- For production revenue agents (ARAS/HustleForge integration) add auth + rate limits in v0.2.
-- This is foundation code. Extend tool registry and prompt for your specific workflows.
+## Tools available to the agent
 
-## Architecture (one file for v0.1 portability)
-- setup.sh: idempotent Termux env bootstrap.
-- grokadile.py: single-file agent with ReAct/JSON loop, 4 core tools, file state, demo mode.
-- Future: split into package, add Durable Objects sync, swarm via Cloudflare Workers.
+| Tool | Purpose |
+|---|---|
+| `shell` | Safe shell commands (30s timeout, destructive patterns blocked) |
+| `read_file` / `write_file` | File I/O restricted to `$HOME` |
+| `list_dir` / `grep` | Directory listing and recursive regex search |
+| `http_get` / `http_post` | Public HTTP requests |
+| `memory_retrieve` | Keyword search over persistent facts |
+| `cf_call` | Call your Cloudflare Worker control plane |
+| `python_exec` | Restricted Python eval (math/json/lists only) |
+| `swarm_status` | Detect other Grokadile instances |
+| `termux_notify` / `termux_tts` | Android notifications and voice output (termux-api) |
 
-Built for high-velocity iteration on phone. Run, observe logs/state, refine prompt/tools.
+## Testing
 
-## Next (after validation)
-Implement priority 3 (expanded safe tools + better parsing) then 4 (vector memory stub or simple fact index).
+```bash
+python -m unittest test_grokadile -v
+```
+
+No network or API key needed: the suite runs the demo loop end-to-end and
+exercises the real streaming path against a local mock SSE server (delta
+accumulation, early JSON parse, `stream: true` payload). CI runs this on
+every push touching `termux/` (`.github/workflows/termux.yml`).
+
+## Safety notes
+
+- Shell tool: 30s timeout, output capture only, destructive command patterns
+  blocked. Never point it at anything you can't afford to lose anyway.
+- FS tools are restricted to paths under `$HOME`. No root, no system changes.
+- `python_exec` blocks imports, dunder access, and I/O builtins.
+- API keys are read from env and never logged.
+
+## Architecture
+
+- `grokadile.py` — single-file agent: ReAct/JSON loop, streaming LLM client,
+  13 tools, persistent state + facts memory, metrics, demo mode.
+- `setup.sh` — idempotent Termux bootstrap.
+- `test_grokadile.py` — regression suite (parsing, demo loop, streaming loop
+  via mock SSE server, tool safety guards).
+- Companions: Kotlin Android app (`../app/`) and Cloudflare Worker backend
+  (`../cloudflare/`).
+
+## Version history
+
+- v0.9 — fixed five bugs that broke every execution path (missing `main()`
+  entrypoint, generator-poisoned `call_llm`, missing `stream: true`,
+  early-exit accepting partial buffers, `NameError` in CLI); added
+  regression test suite + CI.
+- v0.8 — goal.txt support, first-run auto setup, `termux_tts`.
+- v0.7 — streaming deltas wired into the ReAct loop with early JSON parse.
+- v0.6 — streaming LLM client.
+- v0.5 — `termux_notify`, auto tool-error recovery.
+- v0.4 — `python_exec`, `swarm_status`, metrics, packaging.
+- v0.3 — `memory_retrieve`, `cf_call`.
+- v0.2 — `list_dir`, `grep`, `http_post`, LLM retry/backoff.
+- v0.1 — core ReAct loop, 4 tools, demo mode, persistent state.

@@ -1,0 +1,36 @@
+name: Termux Core CI
+
+on:
+  push:
+    branches: [ main, "claude/**" ]
+    paths: [ "termux/**", ".github/workflows/termux.yml" ]
+  pull_request:
+    paths: [ "termux/**", ".github/workflows/termux.yml" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: termux
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Unit and integration tests
+        run: python -m unittest test_grokadile -v
