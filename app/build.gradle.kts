@@ -43,7 +43,7 @@ android {
         buildConfigField(
             "String",
             "CLOUDFLARE_BASE_URL",
-            "\"${secret("CLOUDFLARE_BASE_URL", "https://grokadile.example.workers.dev/")}\"",
+            "\"${secret("CLOUDFLARE_BASE_URL", "https://grokadile-c2.3ainewzealand.workers.dev/")}\"",
         )
     }
 
