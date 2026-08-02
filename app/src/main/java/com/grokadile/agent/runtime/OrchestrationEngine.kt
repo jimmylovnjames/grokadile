@@ -8,6 +8,7 @@ import com.grokadile.domain.model.LogLevel
 import com.grokadile.domain.model.Task
 import com.grokadile.domain.model.TaskStatus
 import com.grokadile.domain.repository.SettingsRepository
+import com.grokadile.data.remote.RemoteTaskSync
 import com.grokadile.domain.repository.TaskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -48,6 +49,7 @@ class OrchestrationEngine @Inject constructor(
     private val registry: AgentRegistry,
     private val settingsRepository: SettingsRepository,
     private val contextFactory: AgentContextFactory,
+    private val remoteTaskSync: RemoteTaskSync,
     private val logger: GrokLogger,
     private val dispatchers: DispatcherProvider,
 ) {
@@ -89,6 +91,8 @@ class OrchestrationEngine @Inject constructor(
 
     private suspend fun runLoop() = coroutineScope {
         taskRepository.requeueOrphans()
+        // Initial remote pull so tasks enqueued while the device was offline appear promptly.
+        runCatching { remoteTaskSync.pullAndEnqueue() }
         val maxConcurrency = settingsRepository.current().maxConcurrency.coerceIn(1, MAX_PERMITS)
         val slots = Semaphore(maxConcurrency)
         _state.update { it.copy(running = true) }
@@ -163,20 +167,21 @@ class OrchestrationEngine @Inject constructor(
                     ),
                 )
                 logger.log(LogLevel.INFO, TAG, "✔ ${task.title}", task.agentId, task.id)
+                remoteTaskSync.report(task, "SUCCEEDED", result.output)
             }
 
             is AgentResult.Retry -> {
                 val attempts = task.attempts + 1
                 if (attempts >= task.maxAttempts) {
-                    taskRepository.upsert(
-                        task.copy(
-                            status = TaskStatus.FAILED,
-                            attempts = attempts,
-                            lastError = "Retries exhausted: ${result.reason}",
-                            updatedAt = now,
-                        ),
+                    val failed = task.copy(
+                        status = TaskStatus.FAILED,
+                        attempts = attempts,
+                        lastError = "Retries exhausted: ${result.reason}",
+                        updatedAt = now,
                     )
+                    taskRepository.upsert(failed)
                     logger.w(TAG, "✘ ${task.title} — retries exhausted: ${result.reason}")
+                    remoteTaskSync.report(failed, "FAILED", failed.lastError)
                 } else {
                     val backoff = result.backoffMillis ?: backoffFor(attempts)
                     taskRepository.upsert(
@@ -203,6 +208,7 @@ class OrchestrationEngine @Inject constructor(
                     ),
                 )
                 logger.e(TAG, "✘ ${task.title}: ${result.reason}", result.cause)
+                remoteTaskSync.report(task, "FAILED", result.reason)
             }
         }
     }

@@ -50,8 +50,6 @@ class RemoteTaskSync @Inject constructor(
 
         var accepted = 0
         val agentIds = registry.all().map { it.id }.ifEmpty {
-            // Even with no agents registered yet, still try common ones so
-            // remote enqueue works before the first local agent loads.
             listOf("screen_reader", "screen_tap", "grok.chat", "echo", "heartbeat")
         }.distinct()
 
@@ -97,7 +95,6 @@ class RemoteTaskSync @Inject constructor(
     private suspend fun ingest(dto: RemoteTaskDto): Boolean {
         val existing = taskRepository.getById(dto.id)
         if (existing != null) {
-            // Already known (pulled earlier or created locally with same id).
             return false
         }
 
@@ -108,7 +105,7 @@ class RemoteTaskSync @Inject constructor(
         }
 
         val task = Task(
-            id = dto.id, // keep remote id so report matches
+            id = dto.id,
             agentId = dto.agentId,
             title = dto.title.ifBlank { "remote:${dto.agentId}" },
             payload = dto.payload.ifBlank { "{}" },
