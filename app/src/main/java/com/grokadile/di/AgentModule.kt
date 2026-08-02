@@ -3,7 +3,10 @@ package com.grokadile.di
 import com.grokadile.agent.builtin.EchoAgent
 import com.grokadile.agent.builtin.GrokChatAgent
 import com.grokadile.agent.builtin.HeartbeatAgent
+import com.grokadile.agent.builtin.ScreenReadingAgent
 import com.grokadile.domain.agent.Agent
+import com.grokadile.domain.agent.ScreenContentProvider
+import com.grokadile.service.LiveScreenContentProvider
 import dagger.Binds
 import dagger.Module
 import dagger.multibindings.IntoSet
@@ -30,4 +33,11 @@ abstract class AgentModule {
     @Binds
     @IntoSet
     abstract fun bindHeartbeatAgent(agent: HeartbeatAgent): Agent
+
+    @Binds
+    @IntoSet
+    abstract fun bindScreenReadingAgent(agent: ScreenReadingAgent): Agent
+
+    @Binds
+    abstract fun bindScreenContentProvider(impl: LiveScreenContentProvider): ScreenContentProvider
 }
