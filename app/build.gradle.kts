@@ -47,6 +47,21 @@ android {
         )
     }
 
+    // A release APK has to be signed to be installable. Point GROKADILE_KEYSTORE at a
+    // real keystore (local.properties or env) for a distributable build; without one we
+    // fall back to the debug key so `assembleRelease` still yields a sideloadable APK.
+    val keystorePath = secret("GROKADILE_KEYSTORE", "")
+    signingConfigs {
+        if (keystorePath.isNotBlank() && rootProject.file(keystorePath).exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystorePath)
+                storePassword = secret("GROKADILE_KEYSTORE_PASSWORD", "")
+                keyAlias = secret("GROKADILE_KEY_ALIAS", "grokadile")
+                keyPassword = secret("GROKADILE_KEY_PASSWORD", "")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -56,6 +71,8 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

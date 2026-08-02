@@ -43,3 +43,16 @@ jobs:
           name: grokadile-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Assemble release APK
+        # No GROKADILE_KEYSTORE secret is configured, so this falls back to the
+        # debug signing key (see app/build.gradle.kts) — installable, but not
+        # suitable for the Play Store.
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: grokadile-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
