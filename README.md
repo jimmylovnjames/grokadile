@@ -5,6 +5,19 @@ agent "tasks" on-device through a persistent foreground service, talks to the
 Grok (xAI) API directly or via a Cloudflare Worker proxy, and is built to be
 extended with new agent logic by adding a single class.
 
+## Priority Order (Capability Roadmap)
+
+See **[PRIORITY.md](PRIORITY.md)** for the locked execution sequence ranked by leverage:
+
+1. **Screen-reading agent (accessibility)** — Medium · Unlocks everything
+2. **ScreenTap / UI Automator agent** — Medium · Full phone control
+3. **Remote dispatch via Cloudflare C2** — Low · Control from anywhere
+4. **Termux-API tool expansion** — Low · Massive capability jump
+5. **SchedulerAgent with cron triggers** — Low · Autonomous scheduled execution
+6. **NotificationListenerAgent** — Medium · Reactive real-world triggers
+7. **Swarm coordination (multi-device)** — Low · Scale to a phone farm
+8. **Vector memory** — High · Long-term intelligence
+
 ## Architecture
 
 Clean, layered, and modular — UI → domain → data, with a runtime engine in the
