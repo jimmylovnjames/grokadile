@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Grokadile v0.8 - Core autonomous agent loop for Android/Termux + Grok 4.5
+Grokadile v0.9 - Core autonomous agent loop for Android/Termux + Grok 4.5
 Single-file, dependency-minimal (requests), JSON-action ReAct style.
 Easier goals (goal.txt) + voice output (TTS) + streaming + recovery.
 
@@ -76,6 +76,17 @@ Available tools (use exact names):
 - swarm_status: List other running Grokadile instances for coordination. args: {}
 - termux_notify: Send Android notification (requires termux-api). args: {"title": "...", "content": "...", "priority": "default|high|low"}
 - termux_tts: Speak text out loud (voice feedback). args: {"text": "message to say"}
+- termux_battery: Current battery status (JSON: percentage, status, temperature...). args: {}
+- termux_clipboard_get: Read system clipboard text. args: {}
+- termux_clipboard_set: Write text to system clipboard. args: {"text": "..."}
+- termux_location: Get current location. args: {"provider": "gps|network|passive"} (default gps)
+- termux_wifi_info: Current Wi-Fi connection info (SSID, IP, link speed...). args: {}
+- termux_device_info: Telephony / device identity info. args: {}
+- termux_sensor_list: List available hardware sensors. args: {}
+- termux_sensor_read: Read a named sensor. args: {"sensor": "accelerometer", "delay_ms": 500, "limit": 1}
+- termux_volume: Get all volumes or set one. args: {"stream": "music|ring|...", "volume": "0-15"} (omit volume to get)
+- termux_torch: Flashlight on/off. args: {"state": "on|off"}
+- termux_brightness: Get or set screen brightness. args: {"level": "0-255 or auto"} (omit to get)
 
 Rules:
 - Always output valid JSON only.
@@ -100,6 +111,15 @@ python_exec: safe limited Python eval for math/json/list ops (no dangerous code)
 swarm_status: detect other Grokadile instances for basic multi-agent coordination
 termux_notify: Android notification via termux-api (pkg install termux-api)
 termux_tts: speak text using phone TTS (voice output for results)
+termux_battery: battery percentage / charging status / temperature
+termux_clipboard_get / termux_clipboard_set: system clipboard read/write
+termux_location: GPS or network location (lat/lon/accuracy)
+termux_wifi_info: connected SSID, IP, link speed, frequency
+termux_device_info: IMEI / phone number / network operator (privacy-sensitive)
+termux_sensor_list / termux_sensor_read: accelerometer, gyroscope, light, proximity, etc.
+termux_volume: query or set media/ring/notification/call volume
+termux_torch: flashlight on or off
+termux_brightness: query or set screen brightness (0-255 or auto)
 """
 
 # === STATE MANAGEMENT ===
@@ -440,6 +460,101 @@ def tool_termux_tts(text: str) -> str:
         return f"ERROR: {str(e)}"
 
 
+def _run_termux(cmd_list, timeout=15):
+    """Shared safe runner for termux-api binaries. Checks presence first."""
+    try:
+        which = subprocess.run(["which", cmd_list[0]], capture_output=True, text=True, timeout=5)
+        if which.returncode != 0:
+            return f"ERROR: termux-api not installed (pkg install termux-api). Missing: {cmd_list[0]}"
+        result = subprocess.run(cmd_list, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0:
+            out = result.stdout.strip()
+            return out if out else "OK"
+        err = (result.stderr or result.stdout or "").strip()
+        return f"ERROR: {err}" if err else f"ERROR: exit {result.returncode}"
+    except subprocess.TimeoutExpired:
+        return f"ERROR: {cmd_list[0]} timed out after {timeout}s"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def tool_termux_battery() -> str:
+    """Battery status JSON (percentage, status, temperature, current, health...)."""
+    return _run_termux(["termux-battery-status"])
+
+
+def tool_termux_clipboard_get() -> str:
+    """Read current system clipboard text."""
+    return _run_termux(["termux-clipboard-get"])
+
+
+def tool_termux_clipboard_set(text: str) -> str:
+    """Write text to system clipboard (capped at 4k chars)."""
+    if not text:
+        return "ERROR: text required"
+    return _run_termux(["termux-clipboard-set", text[:4000]])
+
+
+def tool_termux_location(provider: str = "gps") -> str:
+    """Current location. provider: gps | network | passive."""
+    provider = (provider or "gps").lower()
+    if provider not in ("gps", "network", "passive"):
+        return "ERROR: provider must be gps, network, or passive"
+    return _run_termux(["termux-location", "-p", provider], timeout=30)
+
+
+def tool_termux_wifi_info() -> str:
+    """Wi-Fi connection details (SSID, BSSID, IP, link_speed, frequency...)."""
+    return _run_termux(["termux-wifi-connectioninfo"])
+
+
+def tool_termux_device_info() -> str:
+    """Telephony / device identity (network operator, phone type, etc.)."""
+    return _run_termux(["termux-telephony-deviceinfo"])
+
+
+def tool_termux_sensor_list() -> str:
+    """List available hardware sensors on the device."""
+    return _run_termux(["termux-sensor", "-l"])
+
+
+def tool_termux_sensor_read(sensor: str, delay_ms: int = 500, limit: int = 1) -> str:
+    """Read named sensor (use termux_sensor_list first). delay_ms between samples, limit count."""
+    if not sensor:
+        return "ERROR: sensor name required (use termux_sensor_list first)"
+    try:
+        delay_ms = max(50, int(delay_ms))
+        limit = max(1, min(20, int(limit)))
+    except (TypeError, ValueError):
+        return "ERROR: delay_ms and limit must be integers"
+    return _run_termux(
+        ["termux-sensor", "-s", sensor, "-d", str(delay_ms), "-n", str(limit)],
+        timeout=20,
+    )
+
+
+def tool_termux_volume(stream: str = "music", volume: str = "") -> str:
+    """Get all stream volumes, or set one stream to an integer level."""
+    if volume == "" or volume is None:
+        return _run_termux(["termux-volume"])
+    return _run_termux(["termux-volume", str(stream), str(volume)])
+
+
+def tool_termux_torch(state: str = "on") -> str:
+    """Flashlight on or off."""
+    state = (state or "on").lower()
+    if state not in ("on", "off"):
+        return "ERROR: state must be 'on' or 'off'"
+    return _run_termux(["termux-torch", state])
+
+
+def tool_termux_brightness(level: str = "") -> str:
+    """Get current brightness or set to 0-255 / 'auto'."""
+    if level == "" or level is None:
+        return _run_termux(["termux-brightness"])
+    return _run_termux(["termux-brightness", str(level)])
+
+
 TOOL_MAP = {
     "shell": lambda args: tool_shell(args.get("cmd", "")),
     "read_file": lambda args: tool_read_file(args.get("path", "")),
@@ -454,6 +569,19 @@ TOOL_MAP = {
     "swarm_status": lambda args: tool_swarm_status(),
     "termux_notify": lambda args: tool_termux_notify(args.get("title", "Grokadile"), args.get("content", ""), args.get("priority", "default")),
     "termux_tts": lambda args: tool_termux_tts(args.get("text", "")),
+    "termux_battery": lambda args: tool_termux_battery(),
+    "termux_clipboard_get": lambda args: tool_termux_clipboard_get(),
+    "termux_clipboard_set": lambda args: tool_termux_clipboard_set(args.get("text", "")),
+    "termux_location": lambda args: tool_termux_location(args.get("provider", "gps")),
+    "termux_wifi_info": lambda args: tool_termux_wifi_info(),
+    "termux_device_info": lambda args: tool_termux_device_info(),
+    "termux_sensor_list": lambda args: tool_termux_sensor_list(),
+    "termux_sensor_read": lambda args: tool_termux_sensor_read(
+        args.get("sensor", ""), int(args.get("delay_ms", 500)), int(args.get("limit", 1))
+    ),
+    "termux_volume": lambda args: tool_termux_volume(args.get("stream", "music"), args.get("volume", "")),
+    "termux_torch": lambda args: tool_termux_torch(args.get("state", "on")),
+    "termux_brightness": lambda args: tool_termux_brightness(args.get("level", "")),
 }
 
 def execute_tool(tool_name: str, args: Dict[str, Any]) -> str:
@@ -609,7 +737,7 @@ def run_autonomous(goal: str, demo: bool = False, max_steps: int = MAX_STEPS) ->
 
 # === CLI ===
 def main():
-    parser = argparse.ArgumentParser(description="Grokadile v0.8 - easier goals + voice output + streaming agent")
+    parser = argparse.ArgumentParser(description="Grokadile v0.9 - Termux-API expansion (battery/clipboard/location/sensors/wifi/torch/volume)")
     parser.add_argument("--goal", type=str, help="Task for the agent (or use --goal-file)")
     parser.add_argument("--goal-file", type=str, default=str(BASE_DIR / "goal.txt"), help="Read goal from this file if no --goal given")
     parser.add_argument("--demo", action="store_true", help="Run in offline demo mode")
@@ -647,8 +775,11 @@ def main():
     print(f"Log: {LOG_FILE}")
 
     # Voice output on success (user friendly)
-    if not demo and result.get("final"):
+    if not args.demo and result.get("final"):
         try:
             subprocess.run(["termux-tts-speak", result["final"][:300]], timeout=10, check=False)
         except:
             pass
+
+if __name__ == "__main__":
+    main()

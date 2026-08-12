@@ -8,8 +8,8 @@ Effort estimates assume single high-velocity prompt+build cycles on phone + Term
 | 1 | **Screen-reading agent (accessibility)** | Medium | **Unlocks everything** | ✅ **LANDED** |
 | 2 | **ScreenTap / UI Automator agent** | Medium | Full phone control | ✅ **LANDED** |
 | 3 | **Remote dispatch via Cloudflare C2** | Low | Control from anywhere | ✅ **LANDED** |
-| 4 | **Termux-API tool expansion** | Low | Massive capability jump | next |
-| 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | |
+| 4 | **Termux-API tool expansion** | Low | Massive capability jump | ✅ **LANDED** |
+| 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | next |
 | 6 | **NotificationListenerAgent** | Medium | Reactive real-world triggers | |
 | 7 | **Swarm coordination (multi-device)** | Low | Scale to a phone farm | |
 | 8 | **Vector memory** | High | Long-term intelligence | |
@@ -26,7 +26,11 @@ Effort estimates assume single high-velocity prompt+build cycles on phone + Term
   - HeartbeatWorker + engine start trigger pulls
   - Terminal results (`SUCCEEDED` / `FAILED`) reported back to the worker
 - Cloudflare Worker task enqueue / pull / report endpoints ✅
-- Termux single-file agent (`termux/grokadile.py`) with basic tools ✅
+- **Termux agent (`termux/grokadile.py` v0.9) with expanded Termux-API tools** ✅
+  - battery, clipboard get/set, location, wifi info, device info
+  - sensor list/read, volume, torch, brightness
+  - existing notify + TTS retained
+  - 14 unit tests covering success, missing-api, validation, and error paths
 - Foreground service + WorkManager heartbeat + boot receiver ✅
 
 ## How to remote-control a device
@@ -51,10 +55,20 @@ curl -X POST "https://your-worker.workers.dev/agents/screen_tap/tasks" \
 
 The device pulls on heartbeat / engine start, runs the task, and reports status + detail back.
 
+## Termux-API quick examples (on-device)
+
+```bash
+# After pkg install termux-api
+python grokadile.py --goal "Check battery percentage and speak it"
+python grokadile.py --goal "Read clipboard, then set it to the current time"
+python grokadile.py --goal "Get my approximate location via network provider"
+python grokadile.py --goal "List sensors and read the light sensor once"
+```
+
 ## Execution notes
 
-1–3 closed. Next: **Termux-API tool expansion** for sensors/SMS/battery/clipboard without new native services.
+1–4 closed. Next: **SchedulerAgent with cron triggers** for autonomous scheduled execution.
 
 ---
 
-*Last updated: 2026-08-02 — #3 Remote dispatch via Cloudflare C2 shipped.*
+*Last updated: 2026-08-12 — #4 Termux-API tool expansion shipped (v0.9 + unit tests).*

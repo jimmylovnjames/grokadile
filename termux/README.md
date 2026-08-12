@@ -1,49 +1,50 @@
-# Grokadile v0.1
+# Grokadile Termux Agent (v0.9)
 
-Autonomous AI agent toolbox for Android (Termux) + Grok 4.5 (or compatible LLM).
+Autonomous AI agent for Android (Termux) + Grok. Single-file core with ReAct/JSON loop and a rich Termux-API tool surface.
 
-**Core module priority (INFERRED from standard reliable agent framework dependencies):**
-
-1. Environment bootstrap + launcher (setup.sh, dirs, deps)
-2. Core autonomous loop + tool dispatch + JSON action parsing (grokadile.py)
-3. Safe tool registry and executors (shell/fs/net with timeouts + path guards)
-4. Persistent memory / state layer (json files + in-prompt retrieval)
-5. Configurable LLM client (Grok API + multi-model fallback + demo mode)
-6. Swarm / multi-agent coordinator hooks (future extension point)
-
-This deliverable implements priorities 1 and 2 as a single runnable package. Higher priorities are stubbed for extension.
-
-## Quickstart (Termux on Android)
+## Quickstart
 
 ```bash
-# On your phone in Termux
-pkg update -y && pkg install -y python git
-cd ~/grokadile/termux   # or copy files
+pkg update -y && pkg install -y python git termux-api
+# copy or clone into ~/grokadile/termux
 bash setup.sh
-export GROK_API_KEY="your_xai_key_here"
+export GROK_API_KEY="your_xai_key"
 export GROK_MODEL="grok-4.5"
-python grokadile.py --goal "List files in current dir and create a test note.txt with timestamp"
+python grokadile.py --goal "Check battery and list sensors"
+# offline smoke test
+python grokadile.py --demo --goal "Create a timestamped note"
 ```
 
-- Use `--demo` for offline testing (no API key needed, simulates loop).
-- State persists in `state/state.json`.
-- Logs in `logs/`.
-- Edit `grokadile.py` constants for custom paths or add tools.
+## Expanded Termux-API tools (v0.9)
 
-## Safety & Notes (GUESSED for Termux constraints)
-- Shell tool runs with 30s timeout, captures output only. Never run destructive cmds without review.
-- FS tools restricted to user-writable paths under $HOME by default.
+| Tool | Purpose |
+|------|---------|
+| `termux_battery` | Battery % / status / temperature |
+| `termux_clipboard_get` / `termux_clipboard_set` | System clipboard |
+| `termux_location` | GPS / network / passive location |
+| `termux_wifi_info` | SSID, IP, link speed |
+| `termux_device_info` | Telephony / device identity |
+| `termux_sensor_list` / `termux_sensor_read` | Hardware sensors |
+| `termux_volume` | Get or set stream volumes |
+| `termux_torch` | Flashlight on/off |
+| `termux_brightness` | Screen brightness get/set |
+| `termux_notify` / `termux_tts` | Notifications + voice (existing) |
+
+Plus core tools: `shell`, `read_file`, `write_file`, `list_dir`, `grep`, `http_get`/`http_post`, `python_exec`, `memory_retrieve`, `cf_call`, `swarm_status`.
+
+## Tests
+
+```bash
+python termux/test_termux_api.py
+# or
+python -m pytest termux/test_termux_api.py -q
+```
+
+14 unit tests mock `subprocess` so they run without termux-api installed (CI-friendly).
+
+## Safety
+
+- Shell tool blocks obvious destructive patterns and enforces a 30 s timeout.
+- FS tools restricted under `$HOME`.
+- Termux-API helpers check binary presence and surface clear errors.
 - No root. No system modification.
-- API calls use HTTPS; key never logged.
-- For production revenue agents (ARAS/HustleForge integration) add auth + rate limits in v0.2.
-- This is foundation code. Extend tool registry and prompt for your specific workflows.
-
-## Architecture (one file for v0.1 portability)
-- setup.sh: idempotent Termux env bootstrap.
-- grokadile.py: single-file agent with ReAct/JSON loop, 4 core tools, file state, demo mode.
-- Future: split into package, add Durable Objects sync, swarm via Cloudflare Workers.
-
-Built for high-velocity iteration on phone. Run, observe logs/state, refine prompt/tools.
-
-## Next (after validation)
-Implement priority 3 (expanded safe tools + better parsing) then 4 (vector memory stub or simple fact index).
