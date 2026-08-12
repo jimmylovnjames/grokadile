@@ -58,6 +58,10 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         ActivityResultContracts.RequestPermission(),
     ) { viewModel.refreshPermissions() }
 
+    val micLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { viewModel.refreshPermissions() }
+
     var apiKey by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(settings.grokModel) {
@@ -162,12 +166,17 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 status = status,
                 onGrant = {
                     val type = status.type
-                    if (type == PermissionType.NOTIFICATIONS &&
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                    ) {
-                        notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        settingsLauncher.launch(viewModel.settingsIntentFor(type))
+                    when {
+                        type == PermissionType.NOTIFICATIONS &&
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                            notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        type == PermissionType.MICROPHONE -> {
+                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                        else -> {
+                            settingsLauncher.launch(viewModel.settingsIntentFor(type))
+                        }
                     }
                 },
             )
@@ -209,6 +218,7 @@ private fun PermissionRow(status: PermissionStatus, onGrant: () -> Unit) {
 
 private fun label(type: PermissionType): String = when (type) {
     PermissionType.NOTIFICATIONS -> "Notifications"
+    PermissionType.MICROPHONE -> "Microphone (Hey Grok)"
     PermissionType.OVERLAY -> "Display over other apps"
     PermissionType.BATTERY_OPTIMIZATION -> "Ignore battery optimization"
     PermissionType.ACCESSIBILITY -> "Accessibility service"

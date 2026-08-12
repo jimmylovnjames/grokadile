@@ -26,8 +26,12 @@ class BootCompletedReceiver : BroadcastReceiver() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope.launch {
             try {
-                if (settingsRepository.current().autonomousEnabled) {
+                val settings = settingsRepository.current()
+                if (settings.autonomousEnabled) {
                     AgentForegroundService.start(appContext)
+                }
+                if (settings.voiceListeningEnabled) {
+                    VoiceAssistantService.start(appContext)
                 }
             } finally {
                 pending.finish()

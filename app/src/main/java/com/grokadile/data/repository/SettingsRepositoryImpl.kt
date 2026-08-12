@@ -36,6 +36,7 @@ class SettingsRepositoryImpl @Inject constructor(
         val MODEL = stringPreferencesKey("grok_model")
         val MAX_CONCURRENCY = intPreferencesKey("max_concurrency")
         val RUN_ON_BATTERY = booleanPreferencesKey("run_on_battery")
+        val VOICE_LISTENING = booleanPreferencesKey("voice_listening_enabled")
         val API_KEY = stringPreferencesKey("grok_api_key")
     }
 
@@ -64,6 +65,10 @@ class SettingsRepositoryImpl @Inject constructor(
         dataStore.edit { it[Keys.RUN_ON_BATTERY] = enabled }
     }
 
+    override suspend fun setVoiceListeningEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.VOICE_LISTENING] = enabled }
+    }
+
     override suspend fun setGrokApiKey(key: String) {
         dataStore.edit { it[Keys.API_KEY] = key }
         tokenStore.set(key)
@@ -78,5 +83,6 @@ class SettingsRepositoryImpl @Inject constructor(
         maxConcurrency = this[Keys.MAX_CONCURRENCY] ?: 2,
         hasApiKey = !this[Keys.API_KEY].isNullOrBlank(),
         runOnBattery = this[Keys.RUN_ON_BATTERY] ?: true,
+        voiceListeningEnabled = this[Keys.VOICE_LISTENING] ?: false,
     )
 }

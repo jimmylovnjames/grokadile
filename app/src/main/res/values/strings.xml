@@ -9,6 +9,17 @@
     <string name="agent_notification_text">%1$d agent(s) running · %2$d task(s) queued</string>
     <string name="agent_notification_idle">Standing by</string>
     <string name="action_stop_all">Stop all</string>
+    <string name="action_stop_voice">Stop listening</string>
+
+    <!-- Voice assistant -->
+    <string name="voice_channel_name">Voice Assistant</string>
+    <string name="voice_channel_description">Hey Grok wake-word listening</string>
+    <string name="voice_notification_title">Grokadile is listening</string>
+    <string name="voice_listening_label">Hey Grok listening</string>
+    <string name="command_chat_title">Command chat</string>
+    <string name="command_chat_hint">Ask Grok or issue a command…</string>
+    <string name="command_chat_send">Send</string>
+    <string name="command_chat_mic">Voice command</string>
 
     <!-- Accessibility -->
     <string name="accessibility_service_label">Grokadile Agent Control</string>
