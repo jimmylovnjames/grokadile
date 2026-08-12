@@ -34,6 +34,12 @@ class PermissionManager @Inject constructor(
                 Manifest.permission.POST_NOTIFICATIONS,
             ) == PackageManager.PERMISSION_GRANTED
 
+    fun isMicrophoneGranted(): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+
     fun isOverlayGranted(): Boolean = Settings.canDrawOverlays(context)
 
     fun isBatteryOptimizationIgnored(): Boolean {
@@ -53,6 +59,7 @@ class PermissionManager @Inject constructor(
 
     fun isGranted(type: PermissionType): Boolean = when (type) {
         PermissionType.NOTIFICATIONS -> isNotificationsGranted()
+        PermissionType.MICROPHONE -> isMicrophoneGranted()
         PermissionType.OVERLAY -> isOverlayGranted()
         PermissionType.BATTERY_OPTIMIZATION -> isBatteryOptimizationIgnored()
         PermissionType.ACCESSIBILITY -> isAccessibilityEnabled()
@@ -70,6 +77,7 @@ class PermissionManager @Inject constructor(
 
     fun settingsIntentFor(type: PermissionType): Intent = when (type) {
         PermissionType.NOTIFICATIONS -> appNotificationSettingsIntent()
+        PermissionType.MICROPHONE -> appDetailsSettingsIntent()
         PermissionType.OVERLAY -> overlaySettingsIntent()
         PermissionType.BATTERY_OPTIMIZATION -> batteryOptimizationIntent()
         PermissionType.ACCESSIBILITY -> accessibilitySettingsIntent()
@@ -86,6 +94,10 @@ class PermissionManager @Inject constructor(
     private fun appNotificationSettingsIntent(): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+
+    private fun appDetailsSettingsIntent(): Intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.parse("package:${context.packageName}"))
 
     /**
      * Direct "ignore battery optimizations" request. Subject to Play policy;

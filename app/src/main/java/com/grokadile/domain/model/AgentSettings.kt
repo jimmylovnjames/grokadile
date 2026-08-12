@@ -8,4 +8,6 @@ data class AgentSettings(
     val hasApiKey: Boolean = false,
     /** When false the orchestrator processes only manually-triggered tasks. */
     val runOnBattery: Boolean = true,
+    /** Siri-style always-on "Hey Grok" listening via the voice foreground service. */
+    val voiceListeningEnabled: Boolean = false,
 )

@@ -5,6 +5,9 @@ enum class PermissionType {
     /** Runtime POST_NOTIFICATIONS (API 33+); required for the FGS notification. */
     NOTIFICATIONS,
 
+    /** Runtime RECORD_AUDIO; required for Siri-style voice activation. */
+    MICROPHONE,
+
     /** SYSTEM_ALERT_WINDOW special access; for an on-screen agent HUD. */
     OVERLAY,
 

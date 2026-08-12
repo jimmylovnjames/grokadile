@@ -11,6 +11,7 @@ interface SettingsRepository {
     suspend fun setGrokModel(model: String)
     suspend fun setMaxConcurrency(count: Int)
     suspend fun setRunOnBattery(enabled: Boolean)
+    suspend fun setVoiceListeningEnabled(enabled: Boolean)
 
     /** Stored separately from observable settings; never logged or backed up. */
     suspend fun setGrokApiKey(key: String)
