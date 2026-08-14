@@ -12,9 +12,9 @@ See **[PRIORITY.md](PRIORITY.md)** for the locked execution sequence ranked by l
 1. **Screen-reading agent (accessibility)** — ✅ LANDED
 2. **ScreenTap / UI Automator agent** — ✅ LANDED
 3. **Remote dispatch via Cloudflare C2** — ✅ LANDED
-4. **Termux-API tool expansion** — Low · Massive capability jump  ← next
-5. **SchedulerAgent with cron triggers** — Low · Autonomous scheduled execution
-6. **NotificationListenerAgent** — Medium · Reactive real-world triggers
+4. **Termux-API tool expansion** — ✅ LANDED
+5. **SchedulerAgent with cron triggers** — ✅ LANDED
+6. **NotificationListenerAgent** — Medium · Reactive real-world triggers  ← next
 7. **Swarm coordination (multi-device)** — Low · Scale to a phone farm
 8. **Vector memory** — High · Long-term intelligence
 
@@ -38,7 +38,8 @@ com.grokadile
 │   └── repository/       repository impls
 ├── agent/
 │   ├── runtime/          OrchestrationEngine, AgentRegistry, AgentContext factory
-│   ├── builtin/          EchoAgent, GrokChatAgent, HeartbeatAgent, ScreenReadingAgent, ScreenTapAgent  ← example plugins
+│   ├── builtin/          EchoAgent, GrokChatAgent, HeartbeatAgent, SchedulerAgent,
+│   │                     ScreenReadingAgent, ScreenTapAgent  ← example plugins
 │   └── AgentController    UI-facing facade (start/stop autonomy, enqueue)
 ├── service/              AgentForegroundService, AccessibilityService, Boot receiver, notifications
 ├── worker/               WorkManager heartbeat (resilience net) + scheduler

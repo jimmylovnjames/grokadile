@@ -3,6 +3,7 @@ package com.grokadile.di
 import com.grokadile.agent.builtin.EchoAgent
 import com.grokadile.agent.builtin.GrokChatAgent
 import com.grokadile.agent.builtin.HeartbeatAgent
+import com.grokadile.agent.builtin.SchedulerAgent
 import com.grokadile.agent.builtin.ScreenReadingAgent
 import com.grokadile.agent.builtin.ScreenTapAgent
 import com.grokadile.domain.agent.Agent
@@ -36,6 +37,10 @@ abstract class AgentModule {
     @Binds
     @IntoSet
     abstract fun bindHeartbeatAgent(agent: HeartbeatAgent): Agent
+
+    @Binds
+    @IntoSet
+    abstract fun bindSchedulerAgent(agent: SchedulerAgent): Agent
 
     @Binds
     @IntoSet

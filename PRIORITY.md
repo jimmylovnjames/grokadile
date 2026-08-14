@@ -9,8 +9,8 @@ Effort estimates assume single high-velocity prompt+build cycles on phone + Term
 | 2 | **ScreenTap / UI Automator agent** | Medium | Full phone control | ✅ **LANDED** |
 | 3 | **Remote dispatch via Cloudflare C2** | Low | Control from anywhere | ✅ **LANDED** |
 | 4 | **Termux-API tool expansion** | Low | Massive capability jump | ✅ **LANDED** |
-| 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | next |
-| 6 | **NotificationListenerAgent** | Medium | Reactive real-world triggers | |
+| 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | ✅ **LANDED** |
+| 6 | **NotificationListenerAgent** | Medium | Reactive real-world triggers | next |
 | 7 | **Swarm coordination (multi-device)** | Low | Scale to a phone farm | |
 | 8 | **Vector memory** | High | Long-term intelligence | |
 
@@ -31,6 +31,10 @@ Effort estimates assume single high-velocity prompt+build cycles on phone + Term
   - sensor list/read, volume, torch, brightness
   - existing notify + TTS retained
   - 14 unit tests covering success, missing-api, validation, and error paths
+- **SchedulerAgent (`scheduler`) — interval + 5-field cron** ✅
+  - Enqueues any target agent on a schedule; re-arms itself
+  - Pure-Kotlin cron next-fire (no extra deps); maxRuns / enabled guards
+  - Unit tests for interval, cron matching, validation, termination
 - Foreground service + WorkManager heartbeat + boot receiver ✅
 
 ## How to remote-control a device
@@ -51,6 +55,21 @@ curl -X POST "https://your-worker.workers.dev/agents/screen_tap/tasks" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"tap login","payload":{"action":"click_text","text":"Login"}}'
+
+# Enqueue a daily 08:00 screen dump via the scheduler
+curl -X POST "https://your-worker.workers.dev/agents/scheduler/tasks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "daily morning dump",
+    "payload": {
+      "targetAgentId": "screen_reader",
+      "targetTitle": "Morning hierarchy",
+      "targetPayload": "{\"mode\":\"hierarchy\"}",
+      "schedule": { "type": "cron", "expression": "0 8 * * *" }
+    },
+    "priority": "NORMAL"
+  }'
 ```
 
 The device pulls on heartbeat / engine start, runs the task, and reports status + detail back.
@@ -67,8 +86,8 @@ python grokadile.py --goal "List sensors and read the light sensor once"
 
 ## Execution notes
 
-1–4 closed. Next: **SchedulerAgent with cron triggers** for autonomous scheduled execution.
+1–5 closed. Next: **NotificationListenerAgent** for reactive real-world triggers.
 
 ---
 
-*Last updated: 2026-08-12 — #4 Termux-API tool expansion shipped (v0.9 + unit tests).*
+*Last updated: 2026-08-15 — #5 SchedulerAgent with interval + cron triggers shipped + unit tests.*
