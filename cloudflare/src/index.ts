@@ -4,22 +4,24 @@ import { bearerAuth } from './auth';
 import { proxyChat } from './grok';
 import { pullTasks, enqueueTask } from './tasks';
 import { postReport } from './reports';
+import { deviceHeartbeat, listDevices } from './devices';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Public liveness check (matches the app's CloudflareApi.health()).
 app.get('/health', (c) => c.json({ status: 'ok', version: VERSION, time: Date.now() }));
 
-// Everything else requires the shared app token (when configured).
 app.use('/v1/*', bearerAuth);
 app.use('/agents/*', bearerAuth);
+app.use('/devices/*', bearerAuth);
+app.use('/devices', bearerAuth);
 
-// Grok chat proxy (key stays server-side).
 app.post('/v1/chat/completions', proxyChat);
 
-// Agent control plane.
+app.post('/devices/heartbeat', deviceHeartbeat);
+app.get('/devices', listDevices);
+
 app.get('/agents/:agentId/tasks', pullTasks);
 app.post('/agents/:agentId/tasks', enqueueTask);
 app.post('/agents/:agentId/report', postReport);
