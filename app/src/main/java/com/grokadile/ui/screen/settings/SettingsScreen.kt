@@ -222,4 +222,5 @@ private fun label(type: PermissionType): String = when (type) {
     PermissionType.OVERLAY -> "Display over other apps"
     PermissionType.BATTERY_OPTIMIZATION -> "Ignore battery optimization"
     PermissionType.ACCESSIBILITY -> "Accessibility service"
+    PermissionType.NOTIFICATION_ACCESS -> "Notification access"
 }
