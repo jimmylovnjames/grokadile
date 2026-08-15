@@ -7,6 +7,7 @@ import com.grokadile.agent.builtin.NotificationListenerAgent
 import com.grokadile.agent.builtin.SchedulerAgent
 import com.grokadile.agent.builtin.ScreenReadingAgent
 import com.grokadile.agent.builtin.ScreenTapAgent
+import com.grokadile.agent.builtin.SwarmAgent
 import com.grokadile.domain.agent.Agent
 import com.grokadile.domain.agent.NotificationContentProvider
 import com.grokadile.domain.agent.ScreenActionProvider
@@ -20,11 +21,6 @@ import dagger.multibindings.IntoSet
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 
-/**
- * Contributes the built-in agents into the multibound `Set<Agent>` consumed by
- * [com.grokadile.agent.runtime.DefaultAgentRegistry]. Register a new agent by
- * adding one `@Binds @IntoSet` line here — nothing else needs to change.
- */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class AgentModule {
@@ -56,6 +52,10 @@ abstract class AgentModule {
     @Binds
     @IntoSet
     abstract fun bindNotificationListenerAgent(agent: NotificationListenerAgent): Agent
+
+    @Binds
+    @IntoSet
+    abstract fun bindSwarmAgent(agent: SwarmAgent): Agent
 
     @Binds
     abstract fun bindScreenContentProvider(impl: LiveScreenContentProvider): ScreenContentProvider

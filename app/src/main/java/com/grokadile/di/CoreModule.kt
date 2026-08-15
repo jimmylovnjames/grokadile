@@ -2,6 +2,8 @@ package com.grokadile.di
 
 import com.grokadile.core.common.DefaultDispatcherProvider
 import com.grokadile.core.common.DispatcherProvider
+import com.grokadile.core.device.DeviceIdentity
+import com.grokadile.core.device.DeviceInfoProvider
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,4 +35,8 @@ object CoreModule {
         encodeDefaults = true
         explicitNulls = false
     }
+
+    @Provides
+    @Singleton
+    fun provideDeviceInfo(identity: DeviceIdentity): DeviceInfoProvider = identity
 }
