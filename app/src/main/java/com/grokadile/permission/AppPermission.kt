@@ -16,6 +16,9 @@ enum class PermissionType {
 
     /** BIND_ACCESSIBILITY_SERVICE; only needed for screen-acting agents. */
     ACCESSIBILITY,
+
+    /** NotificationListenerService access; for reactive notification agents. */
+    NOTIFICATION_ACCESS,
 }
 
 data class PermissionStatus(
