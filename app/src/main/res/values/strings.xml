@@ -26,4 +26,10 @@
     <string name="accessibility_service_description">Lets authorized agents read on-screen
         content and perform actions on your behalf. Only enable if you trust the configured
         agents.</string>
+
+    <!-- Notification listener -->
+    <string name="notification_listener_label">Grokadile Notification Listener</string>
+    <string name="notification_listener_description">Lets authorized agents read notifications
+        and react to alerts (SMS, messaging, system events). Only enable if you trust the
+        configured agents.</string>
 </resources>
