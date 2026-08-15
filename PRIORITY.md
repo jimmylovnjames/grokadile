@@ -11,36 +11,31 @@ Ordered by **leverage / unlock sequence**. Execute top-down.
 | 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | ✅ **LANDED** |
 | 6 | **NotificationListenerAgent** | Medium | Reactive real-world triggers | ✅ **LANDED** |
 | 7 | **Swarm coordination (multi-device)** | Low | Scale to a phone farm | ✅ **LANDED** |
-| 8 | **Vector memory** | High | Long-term intelligence | next |
+| 8 | **Vector memory** | High | Long-term intelligence | ✅ **LANDED** |
 
-## Current baseline
+## Vector memory (#8)
 
-1–7 closed including multi-device swarm:
-- DeviceIdentity + worker `/devices` registry + heartbeat
-- Device-targeted pull (`?device_id=`) and claim tracking
-- Enqueue targets: `any` | `all` (broadcast) | specific device
-- SwarmAgent (`swarm`): whoami / list / heartbeat / broadcast / dispatch
+On-device semantic memory — no network required.
 
-## Swarm quick examples
+- `HashingEmbeddingEncoder` — 256-dim offline hashing (tokens + bigrams + trigrams), L2-normalized
+- Room table `vector_memory` (DB v2) + `VectorMemoryRepository`
+- **VectorMemoryAgent** (`vector_memory`): `remember` · `search` · `forget` · `stats` · `clear`
+- Unit tests: VectorMath, embedding ranking, agent roundtrip
+
+### Examples
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" "https://your-worker.workers.dev/devices"
-
-curl -X POST "https://your-worker.workers.dev/agents/screen_reader/tasks" \
+curl -X POST "$WORKER/agents/vector_memory/tasks" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"farm hierarchy","payload":{"mode":"hierarchy"},"target":"all","priority":"HIGH"}'
+  -d '{"title":"note","payload":{"mode":"remember","text":"Bank OTP channel is SMS only","source":"policy"}}'
 
-curl -X POST "https://your-worker.workers.dev/agents/echo/tasks" \
+curl -X POST "$WORKER/agents/vector_memory/tasks" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"ping","payload":{},"target_device_id":"android-XXXXXXXX"}'
+  -d '{"title":"recall","payload":{"mode":"search","query":"how do bank codes arrive","limit":5}}'
 ```
-
-On-device: agent `swarm` with `{"mode":"list"}` or `{"mode":"broadcast","targetAgentId":"screen_reader",...}`.
-
-After deploy: `cd cloudflare && npm run db:init` to apply devices table + targeting columns.
 
 ## Execution notes
 
-1–7 closed. Next: **Vector memory** for long-term intelligence.
+1–8 closed. Original priority list complete.
 
-*Last updated: 2026-08-15 — #7 Swarm coordination shipped.*
+*Last updated: 2026-08-15 — #8 Vector memory shipped.*
