@@ -1,7 +1,7 @@
 package com.grokadile.domain.agent
 
 /** Coarse capabilities an agent declares so the host can gate it on permissions. */
-enum class AgentCapability { NETWORK, ACCESSIBILITY, OVERLAY, NOTIFICATIONS, BACKGROUND }
+enum class AgentCapability { NETWORK, ACCESSIBILITY, OVERLAY, NOTIFICATIONS, BACKGROUND, DEVICE }
 
 /**
  * Static, declarative metadata about an agent plugin. Surfaced in the UI and

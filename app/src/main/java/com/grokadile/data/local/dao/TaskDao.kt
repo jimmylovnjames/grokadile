@@ -25,6 +25,9 @@ abstract class TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id")
     abstract suspend fun getById(id: String): TaskEntity?
 
+    @Query("SELECT * FROM tasks WHERE status = :status ORDER BY updatedAt DESC LIMIT :limit")
+    abstract suspend fun listByStatus(status: String, limit: Int): List<TaskEntity>
+
     @Upsert
     abstract suspend fun upsert(task: TaskEntity)
 

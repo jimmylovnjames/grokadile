@@ -1,10 +1,15 @@
 package com.grokadile.voice
 
 import com.grokadile.agent.AgentController
+import com.grokadile.agent.builtin.AppLaunchAgent
+import com.grokadile.agent.builtin.ClipboardAgent
+import com.grokadile.agent.builtin.DeviceHealthAgent
 import com.grokadile.agent.builtin.EchoAgent
 import com.grokadile.agent.builtin.GrokChatAgent
+import com.grokadile.agent.builtin.PlannerAgent
 import com.grokadile.agent.builtin.ScreenReadingAgent
 import com.grokadile.agent.builtin.ScreenTapAgent
+import com.grokadile.agent.builtin.VectorMemoryAgent
 import com.grokadile.core.common.AppResult
 import com.grokadile.core.logging.GrokLogger
 import com.grokadile.domain.model.ChatMessage
@@ -16,6 +21,7 @@ import com.grokadile.domain.model.TaskStatus
 import com.grokadile.domain.repository.GrokRepository
 import com.grokadile.domain.repository.SettingsRepository
 import com.grokadile.domain.repository.TaskRepository
+import com.grokadile.domain.repository.VectorMemoryRepository
 import com.grokadile.domain.voice.CommandIntent
 import com.grokadile.domain.voice.CommandInterpreter
 import kotlinx.coroutines.delay
@@ -42,6 +48,7 @@ class CommandDispatcher @Inject constructor(
     private val grok: GrokRepository,
     private val settingsRepository: SettingsRepository,
     private val taskRepository: TaskRepository,
+    private val memoryStore: VectorMemoryRepository,
     private val logger: GrokLogger,
 ) {
 
@@ -115,12 +122,85 @@ class CommandDispatcher @Inject constructor(
             successPrefix = intent.message,
             useRawPayload = true,
         )
+        is CommandIntent.Remember -> enqueueAndAwait(
+            agentId = VectorMemoryAgent.ID,
+            title = "Voice: remember",
+            payload = buildJsonObject {
+                put("mode", VectorMemoryAgent.MODE_REMEMBER)
+                put("text", intent.text)
+                put("source", "voice")
+            }.toString(),
+            waiting = "Saving that…",
+            successPrefix = "Remembered",
+        )
+        is CommandIntent.SearchMemory -> enqueueAndAwait(
+            agentId = VectorMemoryAgent.ID,
+            title = "Voice: recall",
+            payload = buildJsonObject {
+                put("mode", VectorMemoryAgent.MODE_SEARCH)
+                put("query", intent.query)
+                put("limit", 5)
+            }.toString(),
+            waiting = "Searching memory…",
+            successPrefix = "From memory",
+        )
+        is CommandIntent.Plan -> enqueueAndAwait(
+            agentId = PlannerAgent.ID,
+            title = "Voice: plan",
+            payload = buildJsonObject {
+                put("goal", intent.goal)
+            }.toString(),
+            waiting = "Planning…",
+            successPrefix = "Plan",
+            timeoutMs = 90_000L,
+        )
+        CommandIntent.ClipboardGet -> enqueueAndAwait(
+            agentId = ClipboardAgent.ID,
+            title = "Voice: clipboard",
+            payload = buildJsonObject { put("mode", ClipboardAgent.MODE_GET) }.toString(),
+            waiting = "Reading clipboard…",
+            successPrefix = "Clipboard",
+        )
+        is CommandIntent.ClipboardSet -> enqueueAndAwait(
+            agentId = ClipboardAgent.ID,
+            title = "Voice: copy",
+            payload = buildJsonObject {
+                put("mode", ClipboardAgent.MODE_SET)
+                put("text", intent.text)
+            }.toString(),
+            waiting = "Copying…",
+            successPrefix = "Copied",
+        )
+        is CommandIntent.LaunchApp -> enqueueAndAwait(
+            agentId = AppLaunchAgent.ID,
+            title = "Voice: open ${intent.query}",
+            payload = buildJsonObject {
+                put("mode", AppLaunchAgent.MODE_LAUNCH)
+                put("query", intent.query)
+            }.toString(),
+            waiting = "Opening ${intent.query}…",
+            successPrefix = "Opened",
+        )
+        CommandIntent.DeviceStatus -> enqueueAndAwait(
+            agentId = DeviceHealthAgent.ID,
+            title = "Voice: device health",
+            payload = buildJsonObject { put("mode", DeviceHealthAgent.MODE_STATUS) }.toString(),
+            waiting = "Checking the phone…",
+            successPrefix = "",
+        )
+        CommandIntent.RetryFailed -> enqueueAndAwait(
+            agentId = DeviceHealthAgent.ID,
+            title = "Voice: retry failed",
+            payload = buildJsonObject { put("mode", DeviceHealthAgent.MODE_RETRY) }.toString(),
+            waiting = "Retrying failed tasks…",
+            successPrefix = "",
+        )
         is CommandIntent.Unknown -> CommandReply(
             spoken = if (intent.raw.isBlank()) {
                 "I didn't catch that. Try again."
             } else {
                 "I'm not sure what to do with that. You can ask me something, " +
-                    "say read the screen, tap a button, or start autonomy."
+                    "say read the screen, remember a note, plan a task, or start autonomy."
             },
         )
     }
@@ -133,13 +213,22 @@ class CommandDispatcher @Inject constructor(
                     "read the screen or start autonomy.",
             )
         }
+        val memories = runCatching {
+            memoryStore.search(prompt, limit = 4, minScore = 0.08f)
+        }.getOrDefault(emptyList())
+        val system = buildString {
+            append(
+                "You are Grokadile, a concise on-device voice assistant. " +
+                    "Keep spoken replies short (1–3 sentences) unless asked for detail.",
+            )
+            if (memories.isNotEmpty()) {
+                append("\n\nRelevant on-device memories:\n")
+                memories.forEach { append("- ${it.item.text.take(220)}\n") }
+            }
+        }
         val request = ChatRequest(
             messages = listOf(
-                ChatMessage(
-                    ChatRole.SYSTEM,
-                    "You are Grokadile, a concise on-device voice assistant. " +
-                        "Keep spoken replies short (1–3 sentences) unless asked for detail.",
-                ),
+                ChatMessage(ChatRole.SYSTEM, system),
                 ChatMessage(ChatRole.USER, prompt),
             ),
             model = settings.grokModel,
@@ -149,6 +238,13 @@ class CommandDispatcher @Inject constructor(
         return when (val result = grok.chat(request)) {
             is AppResult.Success -> {
                 val content = result.data.content.trim()
+                runCatching {
+                    memoryStore.remember(
+                        text = "Q: ${prompt.take(400)}\nA: ${content.take(800)}",
+                        source = "voice",
+                        tags = "chat",
+                    )
+                }
                 CommandReply(spoken = content.take(280), detail = content)
             }
             is AppResult.Failure -> {

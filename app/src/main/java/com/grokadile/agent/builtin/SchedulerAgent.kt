@@ -41,7 +41,7 @@ import javax.inject.Singleton
  *
  * Cron fields: minute (0-59), hour (0-23), day-of-month (1-31), month (1-12),
  * day-of-week (0-6, Sun=0). Supports `*`, single numbers, lists (`1,15`),
- * ranges (`1-5`), and steps (`*/15`, `9-17/2`).
+ * ranges (`1-5`), and steps (star/15, `9-17/2`).
  *
  * Timezone is the device default. The agent enqueues the *target* task for
  * immediate execution, then schedules its own next wake via [Task.scheduledAt].
@@ -92,22 +92,7 @@ class SchedulerAgent @Inject constructor(
             return AgentResult.success("stopped after ${payload.fireCount} fires")
         }
 
-        // 1) Fire the target agent now.
-        val priority = parsePriority(payload.targetPriority)
-        val targetTask = Task(
-            agentId = payload.targetAgentId,
-            title = payload.targetTitle,
-            payload = payload.targetPayload,
-            priority = priority,
-            scheduledAt = System.currentTimeMillis(),
-        )
-        val targetId = context.enqueue(targetTask)
-        context.logger.i(
-            "Schedule '$scheduleKey' fire #$nextCount → ${payload.targetAgentId} " +
-                "(task=$targetId, title='${payload.targetTitle}')",
-        )
-
-        // 2) Compute next trigger time.
+        // Validate the schedule before enqueueing anything.
         val now = System.currentTimeMillis()
         val nextAt = when (payload.type.lowercase()) {
             TYPE_INTERVAL -> {
@@ -127,6 +112,21 @@ class SchedulerAgent @Inject constructor(
             }
             else -> return AgentResult.failure("Unknown schedule type '${payload.type}' (use interval|cron)")
         }
+
+        // 1) Fire the target agent now.
+        val priority = parsePriority(payload.targetPriority)
+        val targetTask = Task(
+            agentId = payload.targetAgentId,
+            title = payload.targetTitle,
+            payload = payload.targetPayload,
+            priority = priority,
+            scheduledAt = now,
+        )
+        val targetId = context.enqueue(targetTask)
+        context.logger.i(
+            "Schedule '$scheduleKey' fire #$nextCount → ${payload.targetAgentId} " +
+                "(task=$targetId, title='${payload.targetTitle}')",
+        )
 
         // 3) Re-arm this scheduler for the next fire.
         val nextPayload = payload.copy(fireCount = nextCount)
@@ -177,7 +177,7 @@ class SchedulerAgent @Inject constructor(
  *
  * Field order: minute hour day-of-month month day-of-week
  * - day-of-week: 0=Sunday … 6=Saturday (also accepts 7=Sunday)
- * - Supports: `*`, `n`, `a,b,c`, `a-b`, `*/n`, `a-b/n`
+ * - Supports: `*`, `n`, `a,b,c`, `a-b`, star/n, `a-b/n`
  */
 object CronNext {
 

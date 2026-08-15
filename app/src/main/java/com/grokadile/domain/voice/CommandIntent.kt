@@ -23,6 +23,22 @@ sealed class CommandIntent {
 
     data class Echo(val message: String) : CommandIntent()
 
+    data class Remember(val text: String) : CommandIntent()
+
+    data class SearchMemory(val query: String) : CommandIntent()
+
+    data class Plan(val goal: String) : CommandIntent()
+
+    data object ClipboardGet : CommandIntent()
+
+    data class ClipboardSet(val text: String) : CommandIntent()
+
+    data class LaunchApp(val query: String) : CommandIntent()
+
+    data object DeviceStatus : CommandIntent()
+
+    data object RetryFailed : CommandIntent()
+
     /** Could not map confidently; [raw] is echoed back for clarification. */
     data class Unknown(val raw: String) : CommandIntent()
 }
