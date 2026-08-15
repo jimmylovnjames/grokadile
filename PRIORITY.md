@@ -9,8 +9,8 @@ Effort estimates assume single high-velocity prompt+build cycles on phone + Term
 | 2 | **ScreenTap / UI Automator agent** | Medium | Full phone control | ✅ **LANDED** |
 | 3 | **Remote dispatch via Cloudflare C2** | Low | Control from anywhere | ✅ **LANDED** |
 | 4 | **Termux-API tool expansion** | Low | Massive capability jump | ✅ **LANDED** |
-| 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | next |
-| 6 | **NotificationListenerAgent** | Medium | Reactive real-world triggers | |
+| 5 | **SchedulerAgent with cron triggers** | Low | Autonomous scheduled execution | ✅ **LANDED** |
+| 6 | **NotificationListenerAgent** | Medium | Reactive real-world triggers | next |
 | 7 | **Swarm coordination (multi-device)** | Low | Scale to a phone farm | |
 | 8 | **Vector memory** | High | Long-term intelligence | |
 
@@ -31,7 +31,15 @@ Effort estimates assume single high-velocity prompt+build cycles on phone + Term
   - sensor list/read, volume, torch, brightness
   - existing notify + TTS retained
   - 14 unit tests covering success, missing-api, validation, and error paths
+- **SchedulerAgent (`scheduler`) with cron + interval triggers** ✅
+  - Fires any registered agent on a recurring schedule
+  - 5-field cron (`minute hour dom month dow`) with `*`, lists, ranges, steps
+  - Interval mode (`intervalMillis`) for simple periodic work
+  - Optional `maxFires` hard stop; durable fire state in agent memory
+  - Self-rearming via `Task.scheduledAt` (no extra WorkManager needed)
+  - Unit tests for interval/cron paths + pure CronNext math
 - Foreground service + WorkManager heartbeat + boot receiver ✅
+- Siri-style voice activation + dashboard command chat ✅
 
 ## How to remote-control a device
 
@@ -55,6 +63,47 @@ curl -X POST "https://your-worker.workers.dev/agents/screen_tap/tasks" \
 
 The device pulls on heartbeat / engine start, runs the task, and reports status + detail back.
 
+## SchedulerAgent quick examples
+
+Seed a schedule by enqueuing a task for agent id `scheduler`:
+
+```bash
+# Every day at 09:00 local — ask Grok for a morning brief
+curl -X POST "https://your-worker.workers.dev/agents/scheduler/tasks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Morning brief schedule",
+    "payload": {
+      "scheduleId": "morning-brief",
+      "type": "cron",
+      "expression": "0 9 * * *",
+      "targetAgentId": "grok.chat",
+      "targetTitle": "Morning brief",
+      "targetPayload": "{\"prompt\":\"Give me a concise morning briefing.\"}"
+    }
+  }'
+
+# Every 30 minutes — dump the screen hierarchy
+curl -X POST "https://your-worker.workers.dev/agents/scheduler/tasks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Periodic screen dump",
+    "payload": {
+      "scheduleId": "screen-watch",
+      "type": "interval",
+      "intervalMillis": 1800000,
+      "targetAgentId": "screen_reader",
+      "targetTitle": "Periodic hierarchy",
+      "targetPayload": "{\"mode\":\"hierarchy\"}",
+      "maxFires": 48
+    }
+  }'
+```
+
+On-device (Dashboard / voice / task UI) you can also enqueue the same JSON payload to agent `scheduler`.
+
 ## Termux-API quick examples (on-device)
 
 ```bash
@@ -67,8 +116,8 @@ python grokadile.py --goal "List sensors and read the light sensor once"
 
 ## Execution notes
 
-1–4 closed. Next: **SchedulerAgent with cron triggers** for autonomous scheduled execution.
+1–5 closed. Next: **NotificationListenerAgent** for reactive real-world triggers (SMS, app alerts, system events).
 
 ---
 
-*Last updated: 2026-08-12 — #4 Termux-API tool expansion shipped (v0.9 + unit tests).*
+*Last updated: 2026-08-15 — #5 SchedulerAgent with cron/interval triggers shipped (unit tests included).*
