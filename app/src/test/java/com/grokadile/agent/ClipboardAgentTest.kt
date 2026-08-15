@@ -35,21 +35,21 @@ class ClipboardAgentTest {
             payload = """{"mode":"set","text":"copied"}""",
         )
         assertTrue(agent.execute(task, FakeAgentContext(task)) is AgentResult.Success)
-        assertEquals("copied", clip.text)
+        assertEquals("copied", clip.contents)
     }
 
     @Test
     fun `bare text sets clipboard`() = runTest {
         val task = Task(agentId = ClipboardAgent.ID, title = "s", payload = "plain note")
         assertTrue(agent.execute(task, FakeAgentContext(task)) is AgentResult.Success)
-        assertEquals("plain note", clip.text)
+        assertEquals("plain note", clip.contents)
     }
 
     @Test
     fun `clear empties clipboard`() = runTest {
         val task = Task(agentId = ClipboardAgent.ID, title = "c", payload = """{"mode":"clear"}""")
         assertTrue(agent.execute(task, FakeAgentContext(task)) is AgentResult.Success)
-        assertNull(clip.text)
+        assertNull(clip.contents)
     }
 
     @Test

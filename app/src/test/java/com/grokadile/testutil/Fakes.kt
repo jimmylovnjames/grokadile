@@ -49,10 +49,10 @@ class FakeGrokRepository(
 class FakeClipboardProvider(
     initial: String? = null,
 ) : ClipboardProvider {
-    var text: String? = initial
-    override fun getText(): String? = text
-    override fun setText(text: String) { this.text = text }
-    override fun clear() { text = null }
+    var contents: String? = initial
+    override fun getText(): String? = contents
+    override fun setText(text: String) { contents = text }
+    override fun clear() { contents = null }
 }
 
 class FakeAppCatalogProvider(
