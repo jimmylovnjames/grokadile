@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.grokadile.service.GrokadileAccessibilityService
+import com.grokadile.service.GrokadileNotificationListenerService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,8 +26,6 @@ import javax.inject.Singleton
 class PermissionManager @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    // --- status ------------------------------------------------------------
-
     fun isNotificationsGranted(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(
@@ -47,6 +46,9 @@ class PermissionManager @Inject constructor(
         return pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
+    fun isNotificationAccessGranted(): Boolean =
+        GrokadileNotificationListenerService.isAuthorized(context)
+
     fun isAccessibilityEnabled(): Boolean {
         val expected = ComponentName(context, GrokadileAccessibilityService::class.java)
             .flattenToString()
@@ -63,6 +65,7 @@ class PermissionManager @Inject constructor(
         PermissionType.OVERLAY -> isOverlayGranted()
         PermissionType.BATTERY_OPTIMIZATION -> isBatteryOptimizationIgnored()
         PermissionType.ACCESSIBILITY -> isAccessibilityEnabled()
+        PermissionType.NOTIFICATION_ACCESS -> isNotificationAccessGranted()
     }
 
     fun snapshot(): List<PermissionStatus> = PermissionType.entries.map { type ->
@@ -73,14 +76,13 @@ class PermissionManager @Inject constructor(
         )
     }
 
-    // --- intents -----------------------------------------------------------
-
     fun settingsIntentFor(type: PermissionType): Intent = when (type) {
         PermissionType.NOTIFICATIONS -> appNotificationSettingsIntent()
         PermissionType.MICROPHONE -> appDetailsSettingsIntent()
         PermissionType.OVERLAY -> overlaySettingsIntent()
         PermissionType.BATTERY_OPTIMIZATION -> batteryOptimizationIntent()
         PermissionType.ACCESSIBILITY -> accessibilitySettingsIntent()
+        PermissionType.NOTIFICATION_ACCESS -> notificationAccessSettingsIntent()
     }
 
     private fun overlaySettingsIntent(): Intent = Intent(
@@ -91,6 +93,9 @@ class PermissionManager @Inject constructor(
     private fun accessibilitySettingsIntent(): Intent =
         Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
 
+    private fun notificationAccessSettingsIntent(): Intent =
+        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+
     private fun appNotificationSettingsIntent(): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -99,11 +104,6 @@ class PermissionManager @Inject constructor(
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
             .setData(Uri.parse("package:${context.packageName}"))
 
-    /**
-     * Direct "ignore battery optimizations" request. Subject to Play policy;
-     * for store builds prefer routing the user to the optimization settings
-     * list ([Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS]) instead.
-     */
     @Suppress("BatteryLife")
     private fun batteryOptimizationIntent(): Intent = Intent(
         Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
