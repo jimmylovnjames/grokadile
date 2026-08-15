@@ -9,8 +9,9 @@
 -keepclasseswithmembers,allowshrinking class * {
     @kotlinx.serialization.Serializable <methods>;
 }
-# Keep @Serializable models in our DTO package.
+# Keep @Serializable models in our DTO package and agent payloads.
 -keep,includedescriptorclasses class com.grokadile.data.remote.dto.** { *; }
+-keep,includedescriptorclasses class com.grokadile.agent.builtin.** { *; }
 
 # Retrofit / OkHttp ---------------------------------------------------------
 -dontwarn okhttp3.**

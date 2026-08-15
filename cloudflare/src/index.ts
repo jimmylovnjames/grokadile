@@ -6,7 +6,7 @@ import { pullTasks, enqueueTask } from './tasks';
 import { postReport } from './reports';
 import { deviceHeartbeat, listDevices } from './devices';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 const app = new Hono<{ Bindings: Env }>();
 

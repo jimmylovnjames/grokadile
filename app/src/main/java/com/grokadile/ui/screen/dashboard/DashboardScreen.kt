@@ -52,6 +52,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.grokadile.R
 import com.grokadile.domain.agent.AgentDescriptor
+import com.grokadile.domain.agent.DeviceHealth
+import com.grokadile.domain.model.VectorSearchHit
 import com.grokadile.ui.component.SectionTitle
 import com.grokadile.ui.component.StatCard
 import com.grokadile.ui.component.StatusChip
@@ -188,10 +190,48 @@ fun DashboardScreen(viewModel: DashboardViewModel = hiltViewModel()) {
                 StatCard("Failed", state.counts.failed.toString(), Modifier.weight(1f))
             }
         }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatCard("Memory", state.extras.memoryCount.toString(), Modifier.weight(1f))
+                StatCard(
+                    "Battery",
+                    state.extras.health?.let { "${it.batteryPercent}%" } ?: "—",
+                    Modifier.weight(1f),
+                )
+            }
+        }
 
         item {
-            Button(onClick = viewModel::runSampleTask, modifier = Modifier.fillMaxWidth()) {
-                Text("Enqueue sample task")
+            DeviceHealthCard(health = state.extras.health)
+        }
+
+        item {
+            MemoryCard(
+                query = state.extras.memoryQuery,
+                hits = state.extras.memoryHits,
+                onQueryChange = viewModel::setMemoryQuery,
+                onSearch = viewModel::searchMemory,
+            )
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = viewModel::runHealthCheck, modifier = Modifier.weight(1f)) {
+                    Text("Health check")
+                }
+                Button(onClick = viewModel::retryFailed, modifier = Modifier.weight(1f)) {
+                    Text("Retry failed")
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = viewModel::runSampleTask, modifier = Modifier.weight(1f)) {
+                    Text("Sample echo")
+                }
+                Button(onClick = viewModel::runSamplePlan, modifier = Modifier.weight(1f)) {
+                    Text("Sample plan")
+                }
             }
         }
 
@@ -284,7 +324,7 @@ private fun CommandChatCard(
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                "Type a command or ask a question. Try: “read the screen”, “tap Login”, “go back”, or “what’s the weather?”",
+                "Try: “read the screen”, “remember the gate code is 4821”, “plan a morning brief”, “open Maps”, or ask a question.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )
@@ -384,6 +424,82 @@ private fun ChatBubble(message: ChatMessageUi) {
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
             )
             Text(message.text, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun DeviceHealthCard(health: DeviceHealth?) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("Device", style = MaterialTheme.typography.titleMedium)
+            if (health == null) {
+                Text(
+                    "Health snapshot unavailable",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            } else {
+                val net = if (health.networkConnected) health.networkType else "offline"
+                val charge = if (health.charging) "charging" else "on battery"
+                Text(
+                    "${health.label} · SDK ${health.sdk}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "Battery ${health.batteryPercent}% $charge · $net",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryCard(
+    query: String,
+    hits: List<VectorSearchHit>,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Vector memory", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search memories…") },
+                    singleLine = true,
+                )
+                Button(onClick = onSearch, enabled = query.isNotBlank()) { Text("Search") }
+            }
+            if (hits.isEmpty()) {
+                Text(
+                    "No hits yet. Share text into Grokadile or say “remember …”.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                )
+            } else {
+                hits.forEach { hit ->
+                    Text(
+                        "${"%.2f".format(hit.score)}  ${hit.item.text.replace('\n', ' ').take(140)}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
     }
 }

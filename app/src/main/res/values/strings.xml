@@ -17,7 +17,9 @@
     <string name="voice_notification_title">Grokadile is listening</string>
     <string name="voice_listening_label">Hey Grok listening</string>
     <string name="command_chat_title">Command chat</string>
-    <string name="command_chat_hint">Ask Grok or issue a command…</string>
+    <string name="command_chat_hint">Ask, remember, plan, or issue a command…</string>
+    <string name="tile_autonomy_label">Grokadile</string>
+    <string name="share_label">Save to Grokadile</string>
     <string name="command_chat_send">Send</string>
     <string name="command_chat_mic">Voice command</string>
 

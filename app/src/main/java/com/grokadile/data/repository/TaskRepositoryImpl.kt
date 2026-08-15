@@ -42,6 +42,11 @@ class TaskRepositoryImpl @Inject constructor(
         dao.getById(id)?.toDomain()
     }
 
+    override suspend fun listByStatus(status: TaskStatus, limit: Int): List<Task> =
+        withContext(dispatchers.io) {
+            dao.listByStatus(status.name, limit.coerceIn(1, 200)).map { it.toDomain() }
+        }
+
     override suspend fun upsert(task: Task) = withContext(dispatchers.io) {
         dao.upsert(task.copy(updatedAt = System.currentTimeMillis()).toEntity())
     }

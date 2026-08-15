@@ -81,6 +81,43 @@ class CommandInterpreterTest {
     }
 
     @Test
+    fun `remember and recall`() {
+        assertEquals(
+            CommandIntent.Remember("the gate code is 4821"),
+            interpreter.localInterpret("remember the gate code is 4821"),
+        )
+        assertEquals(
+            CommandIntent.SearchMemory("gate code"),
+            interpreter.localInterpret("recall gate code"),
+        )
+        assertEquals(
+            CommandIntent.SearchMemory("OTP"),
+            interpreter.localInterpret("what do you remember about OTP"),
+        )
+    }
+
+    @Test
+    fun `plan clipboard launch and health`() {
+        assertEquals(
+            CommandIntent.Plan("a morning brief"),
+            interpreter.localInterpret("plan a morning brief"),
+        )
+        assertEquals(CommandIntent.ClipboardGet, interpreter.localInterpret("what's on the clipboard"))
+        assertEquals(
+            CommandIntent.ClipboardSet("hello"),
+            interpreter.localInterpret("copy hello"),
+        )
+        assertEquals(CommandIntent.LaunchApp("Maps"), interpreter.localInterpret("open Maps"))
+        assertEquals(CommandIntent.DeviceStatus, interpreter.localInterpret("device health"))
+        assertEquals(CommandIntent.RetryFailed, interpreter.localInterpret("retry failed tasks"))
+    }
+
+    @Test
+    fun `open recents is still a global action not launch`() {
+        assertEquals(CommandIntent.GlobalAction("RECENTS"), interpreter.localInterpret("open recents"))
+    }
+
+    @Test
     fun `wake phrase detection helpers`() {
         assertTrue(com.grokadile.voice.VoiceAssistant.containsWakePhrase("hey grok"))
         assertTrue(com.grokadile.voice.VoiceAssistant.containsWakePhrase("Hey Grokadile, tap Login"))

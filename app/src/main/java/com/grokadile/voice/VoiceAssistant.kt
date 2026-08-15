@@ -180,6 +180,10 @@ class VoiceAssistant @Inject constructor(
         _messages.value = emptyList()
     }
 
+    fun postSystem(text: String) {
+        appendSystem(text)
+    }
+
     private fun onWakeDetected(raw: String) {
         if (wakeArmed) return
         wakeArmed = true

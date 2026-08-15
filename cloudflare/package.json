@@ -1,6 +1,6 @@
 {
   "name": "grokadile-worker",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker backend for Grokadile: Grok (xAI) chat proxy + agent control plane.",

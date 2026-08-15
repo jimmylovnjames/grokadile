@@ -20,6 +20,7 @@ interface TaskRepository {
     fun observeCounts(): Flow<TaskCounts>
 
     suspend fun getById(id: String): Task?
+    suspend fun listByStatus(status: TaskStatus, limit: Int = 50): List<Task>
     suspend fun upsert(task: Task)
     suspend fun delete(id: String)
     suspend fun clearTerminal()
