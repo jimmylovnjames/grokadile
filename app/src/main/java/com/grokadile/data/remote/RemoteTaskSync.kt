@@ -1,9 +1,11 @@
 package com.grokadile.data.remote
 
 import com.grokadile.BuildConfig
+import com.grokadile.core.device.DeviceInfoProvider
 import com.grokadile.core.logging.GrokLogger
 import com.grokadile.data.remote.api.CloudflareApi
 import com.grokadile.data.remote.dto.AgentReportDto
+import com.grokadile.data.remote.dto.DeviceHeartbeatRequest
 import com.grokadile.data.remote.dto.RemoteTaskDto
 import com.grokadile.domain.agent.AgentRegistry
 import com.grokadile.domain.model.Task
@@ -13,23 +15,12 @@ import com.grokadile.domain.repository.TaskRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Bridges the Cloudflare Worker control plane to the on-device task queue.
- *
- * - [pullAndEnqueue] polls every registered agent id, maps remote tasks into
- *   local [Task] rows (using the remote UUID as the local id so we can report
- *   back cleanly), and returns how many new tasks were accepted.
- * - [report] posts a status update so the worker can mark the task DONE and
- *   log activity for remote observers.
- *
- * No-ops when CLOUDFLARE_BASE_URL is the placeholder or the network call fails
- * (logged, never throws into the heartbeat / orchestrator).
- */
 @Singleton
 class RemoteTaskSync @Inject constructor(
     private val api: CloudflareApi,
     private val taskRepository: TaskRepository,
     private val registry: AgentRegistry,
+    private val deviceIdentity: DeviceInfoProvider,
     private val logger: GrokLogger,
 ) {
     private val enabled: Boolean
@@ -40,22 +31,25 @@ class RemoteTaskSync @Inject constructor(
                 !base.contains("localhost")
         }
 
-    /**
-     * Pull pending remote tasks for every registered agent and enqueue any
-     * that are not already known locally. Safe to call frequently.
-     * @return number of newly enqueued tasks
-     */
     suspend fun pullAndEnqueue(): Int {
         if (!enabled) return 0
 
+        runCatching { heartbeat() }.onFailure {
+            logger.w(TAG, "swarm heartbeat failed: ${it.message}", it)
+        }
+
         var accepted = 0
         val agentIds = registry.all().map { it.id }.ifEmpty {
-            listOf("screen_reader", "screen_tap", "grok.chat", "echo", "heartbeat")
+            listOf(
+                "screen_reader", "screen_tap", "grok.chat", "echo", "heartbeat",
+                "scheduler", "notification_listener", "swarm",
+            )
         }.distinct()
 
+        val deviceId = deviceIdentity.deviceId
         for (agentId in agentIds) {
             try {
-                val remote = api.pullTasks(agentId)
+                val remote = api.pullTasks(agentId, deviceId)
                 for (dto in remote) {
                     if (ingest(dto)) accepted++
                 }
@@ -65,26 +59,36 @@ class RemoteTaskSync @Inject constructor(
         }
 
         if (accepted > 0) {
-            logger.i(TAG, "Enqueued $accepted remote task(s)")
+            logger.i(TAG, "Enqueued $accepted remote task(s) for device=$deviceId")
         }
         return accepted
     }
 
-    /**
-     * Report terminal (or intermediate) status for a task back to the worker.
-     * Best-effort; failures are logged only.
-     */
+    suspend fun heartbeat() {
+        if (!enabled) return
+        val agents = registry.all().map { it.id }
+        api.deviceHeartbeat(
+            DeviceHeartbeatRequest(
+                deviceId = deviceIdentity.deviceId,
+                label = deviceIdentity.label,
+                agents = agents,
+                meta = deviceIdentity.meta(),
+            ),
+        )
+    }
+
     suspend fun report(task: Task, status: String, detail: String? = null) {
         if (!enabled) return
         try {
             api.report(
                 agentId = task.agentId,
-                report = AgentReportDto(
+                body = AgentReportDto(
                     agentId = task.agentId,
                     taskId = task.id,
                     status = status,
                     detail = detail ?: task.resultData ?: task.lastError,
                     timestamp = System.currentTimeMillis(),
+                    deviceId = deviceIdentity.deviceId,
                 ),
             )
         } catch (t: Throwable) {
@@ -94,9 +98,7 @@ class RemoteTaskSync @Inject constructor(
 
     private suspend fun ingest(dto: RemoteTaskDto): Boolean {
         val existing = taskRepository.getById(dto.id)
-        if (existing != null) {
-            return false
-        }
+        if (existing != null) return false
 
         val priority = when (dto.priority.uppercase()) {
             "HIGH" -> TaskPriority.HIGH
