@@ -16,7 +16,7 @@ See **[PRIORITY.md](PRIORITY.md)** for the locked execution sequence ranked by l
 5. **SchedulerAgent with cron triggers** — ✅ LANDED
 6. **NotificationListenerAgent** — ✅ LANDED
 7. **Swarm coordination (multi-device)** — ✅ LANDED
-8. **Vector memory** — High · Long-term intelligence  ← next
+8. **Vector memory** — ✅ LANDED
 
 ## Architecture
 
@@ -24,7 +24,7 @@ Clean, layered, and modular — UI → domain → data, with a runtime engine in
 middle that drives pluggable agents.
 
 Built-in agents include Echo, GrokChat, Heartbeat, ScreenReading, ScreenTap,
-Scheduler, NotificationListener, and **Swarm** (multi-device coordination).
+Scheduler, NotificationListener, Swarm, and **VectorMemory** (on-device semantic store).
 
 ### Multi-device swarm
 

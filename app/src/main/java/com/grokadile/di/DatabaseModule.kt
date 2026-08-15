@@ -10,6 +10,7 @@ import com.grokadile.data.local.GrokadileDatabase
 import com.grokadile.data.local.dao.AgentMemoryDao
 import com.grokadile.data.local.dao.LogDao
 import com.grokadile.data.local.dao.TaskDao
+import com.grokadile.data.local.dao.VectorMemoryDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,8 +26,6 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): GrokadileDatabase =
         Room.databaseBuilder(context, GrokadileDatabase::class.java, GrokadileDatabase.NAME)
-            // Pre-1.0 schema churn: recreate on version bumps. Add real Migrations
-            // before shipping a stable release.
             .fallbackToDestructiveMigration()
             .build()
 
@@ -38,6 +37,9 @@ object DatabaseModule {
 
     @Provides
     fun provideAgentMemoryDao(db: GrokadileDatabase): AgentMemoryDao = db.agentMemoryDao()
+
+    @Provides
+    fun provideVectorMemoryDao(db: GrokadileDatabase): VectorMemoryDao = db.vectorMemoryDao()
 
     @Provides
     @Singleton

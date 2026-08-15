@@ -8,6 +8,7 @@ import com.grokadile.agent.builtin.SchedulerAgent
 import com.grokadile.agent.builtin.ScreenReadingAgent
 import com.grokadile.agent.builtin.ScreenTapAgent
 import com.grokadile.agent.builtin.SwarmAgent
+import com.grokadile.agent.builtin.VectorMemoryAgent
 import com.grokadile.domain.agent.Agent
 import com.grokadile.domain.agent.NotificationContentProvider
 import com.grokadile.domain.agent.ScreenActionProvider
@@ -56,6 +57,10 @@ abstract class AgentModule {
     @Binds
     @IntoSet
     abstract fun bindSwarmAgent(agent: SwarmAgent): Agent
+
+    @Binds
+    @IntoSet
+    abstract fun bindVectorMemoryAgent(agent: VectorMemoryAgent): Agent
 
     @Binds
     abstract fun bindScreenContentProvider(impl: LiveScreenContentProvider): ScreenContentProvider
