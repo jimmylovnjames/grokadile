@@ -14,8 +14,8 @@ See **[PRIORITY.md](PRIORITY.md)** for the locked execution sequence ranked by l
 3. **Remote dispatch via Cloudflare C2** — ✅ LANDED
 4. **Termux-API tool expansion** — ✅ LANDED
 5. **SchedulerAgent with cron triggers** — ✅ LANDED
-6. **NotificationListenerAgent** — Medium · Reactive real-world triggers  ← next
-7. **Swarm coordination (multi-device)** — Low · Scale to a phone farm
+6. **NotificationListenerAgent** — ✅ LANDED
+7. **Swarm coordination (multi-device)** — Low · Scale to a phone farm  ← next
 8. **Vector memory** — High · Long-term intelligence
 
 ## Architecture
@@ -38,11 +38,11 @@ com.grokadile
 │   └── repository/       repository impls
 ├── agent/
 │   ├── runtime/          OrchestrationEngine, AgentRegistry, AgentContext factory
-│   ├── builtin/          EchoAgent, GrokChatAgent, HeartbeatAgent, ScreenReadingAgent, ScreenTapAgent, SchedulerAgent  ← example plugins
+│   ├── builtin/          EchoAgent, GrokChatAgent, HeartbeatAgent, ScreenReadingAgent, ScreenTapAgent, SchedulerAgent, NotificationListenerAgent  ← example plugins
 │   └── AgentController    UI-facing facade (start/stop autonomy, enqueue)
-├── service/              AgentForegroundService, AccessibilityService, Boot receiver, notifications
+├── service/              AgentForegroundService, AccessibilityService, NotificationListener, Boot receiver, notifications
 ├── worker/               WorkManager heartbeat (resilience net) + scheduler
-├── permission/           PermissionManager + PermissionType (overlay/battery/notifications/a11y)
+├── permission/           PermissionManager + PermissionType (overlay/battery/notifications/a11y/notif-access)
 ├── di/                   Hilt modules (Core, Database, Network, Repository, Agent)
 └── ui/                   Compose + Material3: theme, navigation, Dashboard/Tasks/Logs/Settings
 ```
@@ -141,3 +141,4 @@ Requested/managed from the Settings screen via `PermissionManager`:
 - **Display over other apps** — optional, for an on-screen agent HUD.
 - **Ignore battery optimization** — optional, helps long-running agents survive Doze.
 - **Accessibility service** — optional, only for agents that observe/act on screen.
+- **Notification access** — optional, for NotificationListenerAgent reactive triggers.
