@@ -10,6 +10,7 @@ import com.grokadile.agent.builtin.NotificationListenerAgent
 import com.grokadile.agent.builtin.PlannerAgent
 import com.grokadile.agent.builtin.SchedulerAgent
 import com.grokadile.agent.builtin.ScreenReadingAgent
+import com.grokadile.agent.builtin.ScreenSummaryAgent
 import com.grokadile.agent.builtin.ScreenTapAgent
 import com.grokadile.agent.builtin.SwarmAgent
 import com.grokadile.agent.builtin.VectorMemoryAgent
@@ -55,6 +56,10 @@ abstract class AgentModule {
     @Binds
     @IntoSet
     abstract fun bindScreenTapAgent(agent: ScreenTapAgent): Agent
+
+    @Binds
+    @IntoSet
+    abstract fun bindScreenSummaryAgent(agent: ScreenSummaryAgent): Agent
 
     @Binds
     @IntoSet
