@@ -22,7 +22,7 @@ Closes the observation → decision → action loop in a single agent call.
 
 - **SmartActionAgent** (`smart_action`) — takes a high-level `goal`, dumps the screen, asks Grok for one concrete UI action (click_text / tap / swipe / type / global / none), then executes it via the accessibility action provider.
 - Planner catalog and schema updated so goals like “tap the login button” or “go back” can be planned as a smart_action step.
-- Unit tests cover success path (click_text + fence stripping), accessibility-down retry, dump ERROR, missing goal, network retry, and none/no-op.
+- Unit tests cover success path (click_text + fence stripping), accessibility-down retry, dump ERROR, missing goal, network retry, none/no-op, and global BACK.
 
 ### Example
 

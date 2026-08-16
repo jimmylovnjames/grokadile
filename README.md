@@ -5,7 +5,7 @@ agent "tasks" on-device through a persistent foreground service, talks to the
 Grok (xAI) API directly or via a Cloudflare Worker proxy, and is built to be
 extended with new agent logic by adding a single class.
 
-**Current release: 0.3.1**
+**Current release: 0.3.2**
 
 ## Priority Order (Capability Roadmap)
 
@@ -21,6 +21,7 @@ See **[PRIORITY.md](PRIORITY.md)** for the locked execution sequence ranked by l
 8. **Vector memory** — ✅ LANDED
 9. **Planner + memory-grounded chat + device tools** — ✅ LANDED (0.3.0)
 10. **ScreenSummaryAgent (text vision)** — ✅ LANDED (0.3.1)
+11. **SmartActionAgent (observe → decide → act)** — ✅ LANDED (0.3.2)
 
 ## Architecture
 
@@ -28,8 +29,14 @@ Clean, layered, and modular — UI → domain → data, with a runtime engine in
 middle that drives pluggable agents.
 
 Built-in agents include Echo, GrokChat (RAG + remember), Heartbeat, ScreenReading,
-ScreenTap, **ScreenSummary**, Scheduler, NotificationListener, Swarm, VectorMemory, **Planner**,
+ScreenTap, **ScreenSummary**, **SmartAction**, Scheduler, NotificationListener, Swarm, VectorMemory, **Planner**,
 **Clipboard**, **AppLaunch**, and **DeviceHealth**.
+
+### 0.3.2 highlights
+
+- **SmartActionAgent** — observe screen via accessibility dump, ask Grok for one concrete UI action toward a goal, then execute it (click_text / tap / swipe / type / global / none)
+- Closes the tighter observe → decide → act loop after ScreenSummary
+- Planner catalog includes `smart_action` for natural goals like “tap the login button”
 
 ### 0.3.1 highlights
 
