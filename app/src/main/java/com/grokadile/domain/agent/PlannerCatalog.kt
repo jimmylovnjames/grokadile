@@ -11,6 +11,7 @@ object PlannerCatalog {
         "heartbeat",
         "screen_reader",
         "screen_tap",
+        "screen_summary",
         "scheduler",
         "notification_listener",
         "swarm",
@@ -26,6 +27,7 @@ Known agents and typical payloads:
 - grok.chat: {"prompt":"...","system":"...","model":"...","useMemory":true,"remember":true}
 - screen_reader: {"mode":"text|hierarchy|focused","store":true}
 - screen_tap: {"action":"tap|click_text|type|global|swipe","text":"...","x":0,"y":0,"name":"BACK|HOME"}
+- screen_summary: {"mode":"hierarchy|text|focused","prompt":"optional question about the screen","store":true}
 - scheduler: {"type":"interval|cron","intervalMillis":60000,"expression":"0 9 * * *","targetAgentId":"echo","targetPayload":"{}"}
 - notification_listener: {"mode":"list|match"}
 - swarm: {"mode":"status|heartbeat"}

@@ -13,45 +13,28 @@ Ordered by **leverage / unlock sequence**. Execute top-down.
 | 7 | **Swarm coordination (multi-device)** | Low | Scale to a phone farm | ✅ **LANDED** |
 | 8 | **Vector memory** | High | Long-term intelligence | ✅ **LANDED** |
 | 9 | **Planner + memory chat + device tools** | Medium | Compose all agents; act on the phone | ✅ **LANDED** |
+| 10 | **ScreenSummaryAgent (text vision)** | Low | Understand current UI via Grok | ✅ **LANDED** |
 
-## Planner + device tools (#9)
+## ScreenSummaryAgent (#10)
 
-Grokadile 0.3.0 — the original 1–8 list is closed; this wave composes them.
+Grokadile now has a text-based vision step: dump the accessibility tree and ask Grok to summarize the UI, extract key elements, and suggest actions.
 
-- **PlannerAgent** (`planner`) — Grok returns a JSON step list; only catalogued agent ids are enqueued
-- **GrokChatAgent** — optional RAG from `vector_memory`, then remembers the Q&A
-- **ClipboardAgent** (`clipboard`) — `get` · `set` · `clear`
-- **AppLaunchAgent** (`app_launch`) — `launch` · `list` · `find`
-- **DeviceHealthAgent** (`device_health`) — `status` · `retry_failed` · `prune`
-- Share target + Quick Settings autonomy tile + voice commands for the new agents
+- **ScreenSummaryAgent** (`screen_summary`) — `mode` · `prompt` · `store`
+- Planner catalog updated so goals like “what’s on my screen?” or “find the settings button” can plan a summary step
+- Unit tests cover happy path, accessibility-down retry, dump errors, custom prompts, and network retry
 
-### Examples
+### Example
 
 ```bash
-curl -X POST "$WORKER/agents/planner/tasks" \
+curl -X POST "$WORKER/agents/screen_summary/tasks" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"brief","payload":{"goal":"Check device health then remember a one-line status"}}'
-
-curl -X POST "$WORKER/agents/clipboard/tasks" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"copy","payload":{"mode":"set","text":"4821"}}'
-
-curl -X POST "$WORKER/agents/app_launch/tasks" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"maps","payload":{"mode":"launch","query":"Maps"}}'
-
-curl -X POST "$WORKER/agents/device_health/tasks" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"vitals","payload":{"mode":"status"}}'
+  -d '{"title":"see","payload":{"mode":"hierarchy","prompt":"What can I tap to open settings?"}}'
 ```
 
-Voice / chat: “remember the gate code is 4821”, “recall gate code”, “plan a morning brief”,
-“open Maps”, “what’s on the clipboard”, “device health”, “retry failed tasks”.
-
-Share a note into Grokadile to remember it. Prefix with `plan:` to run the planner.
+Voice / chat: “summarize the screen”, “what’s on my screen?”, “describe this UI”.
 
 ## Execution notes
 
-1–9 closed. Next leverage is vision (screenshot → Grok) or tighter tool-calling loops.
+1–10 closed for the text-vision layer. Next leverage remains true screenshot → Grok vision multimodal, or tighter tool-calling loops that chain summary → tap automatically.
 
-*Last updated: 2026-08-15 — #9 Planner + device tools shipped (0.3.0).*
+*Last updated: 2026-08-16 — #10 ScreenSummaryAgent shipped.*
