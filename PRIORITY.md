@@ -14,27 +14,28 @@ Ordered by **leverage / unlock sequence**. Execute top-down.
 | 8 | **Vector memory** | High | Long-term intelligence | ✅ **LANDED** |
 | 9 | **Planner + memory chat + device tools** | Medium | Compose all agents; act on the phone | ✅ **LANDED** |
 | 10 | **ScreenSummaryAgent (text vision)** | Low | Understand current UI via Grok | ✅ **LANDED** |
+| 11 | **ScreenActAgent (goal → dump → decide → act)** | Low | Closed-loop UI automation from natural goals | ✅ **LANDED** |
 
-## ScreenSummaryAgent (#10)
+## ScreenActAgent (#11)
 
-Grokadile now has a text-based vision step: dump the accessibility tree and ask Grok to summarize the UI, extract key elements, and suggest actions.
+Closes the tighter observation → decision → action loop. Given a natural-language goal, dumps the accessibility tree, asks Grok for a single ScreenTap-compatible action JSON, then executes it (or dry-runs).
 
-- **ScreenSummaryAgent** (`screen_summary`) — `mode` · `prompt` · `store`
-- Planner catalog updated so goals like “what’s on my screen?” or “find the settings button” can plan a summary step
-- Unit tests cover happy path, accessibility-down retry, dump errors, custom prompts, and network retry
+- **ScreenActAgent** (`screen_act`) — `goal` · `mode` · `dryRun` · `model`
+- Planner catalog includes `screen_act` so goals like “tap Login” or “go back” can plan a single act step
+- Unit tests cover happy-path click_text, dry-run, none, accessibility retry, missing goal, network retry, and markdown-wrapped JSON tolerance
 
 ### Example
 
 ```bash
-curl -X POST "$WORKER/agents/screen_summary/tasks" \
+curl -X POST "$WORKER/agents/screen_act/tasks" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"see","payload":{"mode":"hierarchy","prompt":"What can I tap to open settings?"}}'
+  -d '{"title":"act","payload":{"goal":"Open Settings","dryRun":false}}'
 ```
 
-Voice / chat: “summarize the screen”, “what’s on my screen?”, “describe this UI”.
+Voice / chat: “tap the login button”, “open settings”, “go back”.
 
 ## Execution notes
 
-1–10 closed for the text-vision layer. Next leverage remains true screenshot → Grok vision multimodal, or tighter tool-calling loops that chain summary → tap automatically.
+1–11 closed for the text-vision + single-step act layer. Next leverage remains true screenshot → Grok vision multimodal, multi-step tool-calling loops with verification, or richer planner feedback.
 
-*Last updated: 2026-08-16 — #10 ScreenSummaryAgent shipped.*
+*Last updated: 2026-08-17 — #11 ScreenActAgent shipped.*
