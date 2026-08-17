@@ -14,27 +14,33 @@ Ordered by **leverage / unlock sequence**. Execute top-down.
 | 8 | **Vector memory** | High | Long-term intelligence | ✅ **LANDED** |
 | 9 | **Planner + memory chat + device tools** | Medium | Compose all agents; act on the phone | ✅ **LANDED** |
 | 10 | **ScreenSummaryAgent (text vision)** | Low | Understand current UI via Grok | ✅ **LANDED** |
+| 11 | **ScreenWaitAgent (sync UI chains)** | Low | Reliable multi-step automation | ✅ **LANDED** |
 
-## ScreenSummaryAgent (#10)
+## ScreenWaitAgent (#11)
 
-Grokadile now has a text-based vision step: dump the accessibility tree and ask Grok to summarize the UI, extract key elements, and suggest actions.
+Polls the accessibility tree until a condition is satisfied (or timeout). Closes race conditions between UI actions so planner / voice / C2 chains can be reliable.
 
-- **ScreenSummaryAgent** (`screen_summary`) — `mode` · `prompt` · `store`
-- Planner catalog updated so goals like “what’s on my screen?” or “find the settings button” can plan a summary step
-- Unit tests cover happy path, accessibility-down retry, dump errors, custom prompts, and network retry
+- **ScreenWaitAgent** (`screen_wait`) — `mode` · `text` · `packageName` · `timeoutMs` · `pollMs` · `exact`
+- Modes: `appear` (wait for text), `disappear` (wait until gone), `package` (wait for active package)
+- Planner catalog includes `screen_wait` so goals can insert explicit wait steps
+- Unit tests cover appear / disappear / package / a11y-down / validation / timeout / exact match
 
 ### Example
 
 ```bash
-curl -X POST "$WORKER/agents/screen_summary/tasks" \
+curl -X POST "$WORKER/agents/screen_wait/tasks" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"title":"see","payload":{"mode":"hierarchy","prompt":"What can I tap to open settings?"}}'
+  -d '{"title":"wait-settings","payload":{"mode":"appear","text":"Settings","timeoutMs":10000,"pollMs":400}}'
 ```
 
-Voice / chat: “summarize the screen”, “what’s on my screen?”, “describe this UI”.
+Typical plan fragment after a tap:
+
+1. `screen_tap` click “Open”
+2. `screen_wait` appear “Success” (or package change)
+3. next action
 
 ## Execution notes
 
-1–10 closed for the text-vision layer. Next leverage remains true screenshot → Grok vision multimodal, or tighter tool-calling loops that chain summary → tap automatically.
+1–11 closed for the sync layer of the observe → act loop. Next leverage remains true screenshot → Grok vision multimodal, or a multi-step ScreenAct / SmartAction loop that auto-chains summary + wait + tap.
 
-*Last updated: 2026-08-16 — #10 ScreenSummaryAgent shipped.*
+*Last updated: 2026-08-18 — #11 ScreenWaitAgent shipped.*
