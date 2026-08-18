@@ -37,7 +37,7 @@ ScreenTap, **ScreenSummary**, **ScreenWait**, **ScreenAct**, Scheduler, Notifica
 
 - **ScreenActAgent** — high-level observe → decide → act → confirm loop; one natural-language goal drives multi-step UI automation
 - Planner catalog includes `screen_act` so goals like “Open Settings and turn Wi-Fi off” dispatch as a single agent
-- Structured for a future screenshot → multimodal Grok vision path (`ScreenUnderstanding`; text dump is the current perception)
+- Structured for screenshot → multimodal Grok vision (`perception=vision` uses accessibility `takeScreenshot`, not MediaProjection; dump stays as text grounding)
 
 ### 0.3.2 highlights
 

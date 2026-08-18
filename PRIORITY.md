@@ -47,7 +47,7 @@ Closes the multi-step UI automation loop. Given a natural-language goal, the age
 - **ScreenActAgent** (`screen_act`) — `goal` · `maxSteps` · `timeoutMs` · `model` · `store` · `confirmWithWait`
 - Composes landed tools: accessibility dump (ScreenReading), Grok decision (ScreenSummary-style), tap/type/swipe/global (ScreenTap), optional confirm (ScreenWait)
 - Planner catalog includes `screen_act` so a goal like “Open Settings and turn Wi-Fi off” can be one dispatchable step
-- **Vision-ready:** `ScreenUnderstanding` isolates perception. Today it uses accessibility text; `perception=vision` is a documented swap point for screenshot → multimodal Grok (not implemented yet — no MediaProjection)
+- **Vision-ready:** `perception=vision` captures a screenshot via `AccessibilityService.takeScreenshot` (API 30+, not MediaProjection) and sends it to `grok-2-vision-latest` as a multimodal image part. The accessibility dump stays as text grounding. If capture fails, the loop falls back to text.
 
 ### Example
 
@@ -59,6 +59,6 @@ curl -X POST "$WORKER/agents/screen_act/tasks" \
 
 ## Execution notes
 
-1–12 closed for the text-based observe → decide → act → confirm loop. Next leverage remains true screenshot → Grok vision multimodal (plug into `ScreenUnderstanding.observeVision`).
+1–12 closed for the observe → decide → act → confirm loop, including screenshot → Grok vision when `perception=vision`.
 
-*Last updated: 2026-08-18 — #12 ScreenActAgent shipped.*
+*Last updated: 2026-08-18 — #12 ScreenActAgent shipped (vision path via accessibility screenshot).*

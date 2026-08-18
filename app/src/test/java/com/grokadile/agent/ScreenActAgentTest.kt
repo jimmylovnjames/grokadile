@@ -27,6 +27,7 @@ class ScreenActAgentTest {
         ),
         var pkg: String? = "com.example.app",
         var title: String? = "Home",
+        var screenshotBytes: ByteArray? = null,
     ) : ScreenContentProvider {
         private var dumpIdx = 0
         var dumpCalls = 0
@@ -40,6 +41,7 @@ class ScreenActAgentTest {
         }
         override fun activePackage(): String? = pkg
         override fun activeWindowTitle(): String? = title
+        override fun screenshot(): ByteArray? = screenshotBytes
 
         fun setDumps(vararg values: String) {
             dumps.clear()
@@ -293,7 +295,7 @@ class ScreenActAgentTest {
     }
 
     @Test
-    fun `vision perception falls back to accessibility text and still works`() = runTest {
+    fun `vision perception falls back to accessibility text when screenshot missing`() = runTest {
         val actions = FakeActions()
         val grok = grok("""{"status":"done","reason":"already on home"}""")
         val agent = ScreenActAgent(FakeScreen(), actions, json)
@@ -308,9 +310,36 @@ class ScreenActAgentTest {
 
         assertTrue(result is AgentResult.Success)
         assertTrue(actions.calls.isEmpty())
-        val userMsg = grok.requests[0].messages.last { it.role.name == "USER" }.content
-        assertTrue(userMsg.contains("ACCESSIBILITY_TEXT") || userMsg.contains("Accessibility dump"))
-        assertTrue(userMsg.contains("Open Settings"))
+        val user = grok.requests[0].messages.last { it.role.name == "USER" }
+        assertTrue(user.images.isEmpty())
+        assertTrue(user.content.contains("ACCESSIBILITY_TEXT") || user.content.contains("Accessibility dump"))
+        assertTrue(user.content.contains("Open Settings"))
+        assertEquals("grok-2-latest", grok.requests[0].model)
+    }
+
+    @Test
+    fun `vision perception attaches screenshot and uses vision model`() = runTest {
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0x02, 0x03)
+        val screen = FakeScreen(screenshotBytes = jpeg)
+        val grok = grok("""{"status":"done","reason":"home is visible"}""")
+        val agent = ScreenActAgent(screen, FakeActions(), json)
+        val task = Task(
+            agentId = ScreenActAgent.ID,
+            title = "act",
+            payload = """{"goal":"be on home","perception":"vision","settleMs":0}""",
+        )
+        val context = FakeAgentContext(task, grok = grok)
+
+        val result = agent.execute(task, context)
+
+        assertTrue(result is AgentResult.Success)
+        val request = grok.requests[0]
+        assertEquals("grok-2-vision-latest", request.model)
+        val user = request.messages.last { it.role.name == "USER" }
+        assertEquals(1, user.images.size)
+        assertTrue(user.images[0].bytes.contentEquals(jpeg))
+        assertTrue(user.content.contains("VISION") || user.content.contains("Screenshot"))
+        assertTrue(user.content.contains("Open Settings"))
     }
 
     @Test

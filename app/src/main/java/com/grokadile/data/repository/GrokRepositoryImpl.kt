@@ -33,7 +33,7 @@ class GrokRepositoryImpl @Inject constructor(
                     )
                 AppResult.Success(
                     ChatResponse(
-                        content = choice.message.content,
+                        content = choice.message.textContent(),
                         model = dto.model.ifBlank { request.model },
                         finishReason = choice.finishReason,
                         usage = dto.usage?.toDomain(),

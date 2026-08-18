@@ -11,6 +11,7 @@ import com.grokadile.domain.agent.AgentLogger
 import com.grokadile.domain.agent.AgentResult
 import com.grokadile.domain.agent.ScreenActionProvider
 import com.grokadile.domain.agent.ScreenContentProvider
+import com.grokadile.domain.model.ChatImage
 import com.grokadile.domain.model.ChatMessage
 import com.grokadile.domain.model.ChatRequest
 import com.grokadile.domain.model.ChatRole
@@ -25,7 +26,7 @@ import javax.inject.Singleton
  * High-level observe → decide → act → confirm loop.
  *
  * Given a natural-language [Payload.goal], repeatedly:
- * 1. Observes the current screen (accessibility dump today; screenshot+vision later)
+ * 1. Observes the current screen (accessibility dump, or screenshot + dump when perception=vision)
  * 2. Asks Grok for the single best next UI action toward the goal
  * 3. Executes it via [ScreenActionProvider] (same surface as [ScreenTapAgent])
  * 4. Optionally waits for an expected change ([ScreenWaitAgent] style)
@@ -46,9 +47,9 @@ import javax.inject.Singleton
  * Last outcome is stored under `last_screen_act`, `last_screen_act_goal`,
  * `last_screen_act_steps`, `last_screen_act_status`, `last_screen_act_ts`.
  *
- * Perception is pluggable: [Payload.perception] `"accessibility"` (default) vs
- * `"vision"`. Vision is not implemented yet and falls back to the text dump;
- * see [ScreenUnderstanding] for the exact swap point.
+ * Perception is pluggable: [Payload.perception] `"accessibility"` (default text dump)
+ * vs `"vision"` (AccessibilityService.takeScreenshot → multimodal Grok, dump as grounding).
+ * See [ScreenUnderstanding].
  */
 @Singleton
 class ScreenActAgent @Inject constructor(
@@ -70,7 +71,7 @@ class ScreenActAgent @Inject constructor(
         val maxNodes: Int = 250,
         val pollMs: Long = 400L,
         val settleMs: Long = 300L,
-        /** `"accessibility"` (text dump) or `"vision"` (screenshot path; falls back today). */
+        /** `"accessibility"` (text dump) or `"vision"` (screenshot + multimodal Grok). */
         val perception: String = PERCEPTION_ACCESSIBILITY,
     )
 
@@ -267,12 +268,21 @@ class ScreenActAgent @Inject constructor(
             append("\nReply with ONLY a single JSON object (no markdown, no prose).")
         }
 
+        val userMessage = ChatMessage(
+            role = ChatRole.USER,
+            content = userContent,
+            images = snapshot.imageBytes?.let { listOf(ChatImage(it, snapshot.imageMime)) }
+                ?: emptyList(),
+        )
+        val model = payload.model?.takeIf { it.isNotBlank() }
+            ?: if (snapshot.imageBytes != null) DEFAULT_VISION_MODEL else DEFAULT_MODEL
+
         val request = ChatRequest(
             messages = listOf(
                 ChatMessage(ChatRole.SYSTEM, SYSTEM_PROMPT),
-                ChatMessage(ChatRole.USER, userContent),
+                userMessage,
             ),
-            model = payload.model ?: DEFAULT_MODEL,
+            model = model,
             temperature = 0.2,
             maxTokens = 280,
         )
@@ -495,16 +505,15 @@ class ScreenActAgent @Inject constructor(
     /**
      * How the agent perceives the current screen.
      *
-     * [ACCESSIBILITY_TEXT] is the shipped path (dump + Grok JSON plan).
-     * [VISION] is reserved for screenshot → multimodal Grok; [ScreenUnderstanding]
-     * falls back to accessibility until that pipeline exists.
+     * [ACCESSIBILITY_TEXT] is the cheap path (dump + Grok JSON plan).
+     * [VISION] captures a screenshot via accessibility and sends it as a
+     * multimodal Grok image part, with the dump kept as grounding text.
      */
     internal enum class PerceptionMode { ACCESSIBILITY_TEXT, VISION }
 
     /**
-     * Snapshot handed to the decide step. Text path fills [dump]; the vision
-     * path will additionally fill [description] (and later attach image bytes
-     * on [ChatRequest] once the domain model supports multimodal parts).
+     * Snapshot handed to the decide step. Text path fills [dump]; vision path
+     * also fills [imageBytes] so [decide] can attach a ChatImage.
      */
     internal data class ScreenSnapshot(
         val mode: PerceptionMode,
@@ -512,6 +521,8 @@ class ScreenActAgent @Inject constructor(
         val title: String?,
         val dump: String,
         val description: String = "",
+        val imageBytes: ByteArray? = null,
+        val imageMime: String = "image/jpeg",
     ) {
         fun toPromptBlock(maxDumpChars: Int = MAX_DUMP_CHARS): String = buildString {
             append("Perception: ").append(mode.name).append('\n')
@@ -519,6 +530,11 @@ class ScreenActAgent @Inject constructor(
             if (!title.isNullOrBlank()) append("Title: ").append(title).append('\n')
             if (description.isNotBlank()) {
                 append("\nScreen description:\n").append(description).append('\n')
+            }
+            if (imageBytes != null) {
+                append("\nScreenshot: attached (").append(imageBytes.size)
+                    .append(" bytes, ").append(imageMime)
+                    .append("). Prefer what you see in the image; use the dump for labels.\n")
             }
             append("\nAccessibility dump:\n")
             append(dump.take(maxDumpChars))
@@ -559,24 +575,27 @@ class ScreenActAgent @Inject constructor(
         }
 
         /**
-         * TODO(vision): Plug the screenshot → multimodal Grok path here.
+         * Screenshot → multimodal Grok path.
          *
-         * When a capture surface exists (MediaProjection / ScreenCaptureProvider):
-         *  1. Grab a PNG/JPEG of the current display.
-         *  2. Send it as an image content part on ChatRequest (ChatMessage will
-         *     need a multimodal content type — do not overload [dump] for bytes).
-         *  3. Fill [ScreenSnapshot.description] from the vision reply, or skip a
-         *     separate describe call and let [decide] see the image directly.
-         *  4. Keep [ScreenSnapshot.dump] as a cheap text grounding signal.
-         *
-         * Do not implement MediaProjection in this agent. Until that pipeline
-         * ships, VISION falls back to accessibility text so the loop still works.
+         * Capture is [ScreenContentProvider.screenshot] (AccessibilityService.takeScreenshot
+         * on API 30+). The JPEG is attached as a ChatImage on the decide call;
+         * the accessibility dump stays as a text grounding signal for labels.
+         * If capture fails, fall back to accessibility text so the loop still works.
          */
         private fun observeVision(payload: Payload, logger: AgentLogger): ScreenSnapshot {
-            logger.w(
-                "perception=vision is not implemented yet; falling back to accessibility text",
+            val text = observeAccessibility(payload)
+            val jpeg = screen.screenshot()
+            if (jpeg == null || jpeg.isEmpty()) {
+                logger.w("screenshot unavailable; falling back to accessibility text")
+                return text
+            }
+            logger.i("captured screenshot ${jpeg.size} bytes for vision decide")
+            return text.copy(
+                mode = PerceptionMode.VISION,
+                imageBytes = jpeg,
+                imageMime = "image/jpeg",
+                description = "Screenshot attached (${jpeg.size} bytes). Use the image plus the dump.",
             )
-            return observeAccessibility(payload)
         }
     }
 
@@ -591,11 +610,12 @@ class ScreenActAgent @Inject constructor(
         const val PERCEPTION_VISION = "vision"
 
         private const val DEFAULT_MODEL = "grok-2-latest"
+        private const val DEFAULT_VISION_MODEL = "grok-2-vision-latest"
         private const val MAX_DUMP_CHARS = 6_000
 
         private const val SYSTEM_PROMPT =
             "You are Grokadile's UI actor. You receive an Android screen snapshot " +
-            "(accessibility dump today; later a screenshot description) plus a goal and " +
+            "(accessibility dump, and sometimes a screenshot) plus a goal and " +
             "the steps already taken. Output ONLY a single JSON object (no markdown, no prose).\n" +
             "Shapes:\n" +
             "{\"status\":\"continue\",\"action\":\"click_text\",\"text\":\"Login\",\"exact\":false," +
@@ -610,7 +630,7 @@ class ScreenActAgent @Inject constructor(
             "{\"status\":\"done\",\"action\":\"done\",\"reason\":\"Wi-Fi is already off\"}\n" +
             "{\"status\":\"stuck\",\"action\":\"none\",\"reason\":\"no matching element\"}\n" +
             "Prefer click_text when a visible label matches. Never invent UI that is not in " +
-            "the dump. Use history to avoid repeating a failed action. Set status=done when " +
+            "the dump or screenshot. Use history to avoid repeating a failed action. Set status=done when " +
             "the goal is achieved. Set status=stuck only if no safe action remains. " +
             "When the next screen should show specific text after an action, set expectText " +
             "(or expect.packageName) so the device can wait before the next step."

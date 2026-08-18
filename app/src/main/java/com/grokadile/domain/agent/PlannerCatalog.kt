@@ -31,7 +31,7 @@ Known agents and typical payloads:
 - screen_tap: {"action":"tap|click_text|type|global|swipe","text":"...","x":0,"y":0,"name":"BACK|HOME"}
 - screen_summary: {"mode":"hierarchy|text|focused","prompt":"optional question about the screen","store":true}
 - screen_wait: {"mode":"appear|disappear|package","text":"...","packageName":"...","timeoutMs":15000,"pollMs":500,"exact":false}
-- screen_act: {"goal":"Open Settings and turn Wi-Fi off","maxSteps":8,"timeoutMs":90000,"model":"grok-2-latest","store":true,"confirmWithWait":true}
+- screen_act: {"goal":"Open Settings and turn Wi-Fi off","maxSteps":8,"timeoutMs":90000,"perception":"accessibility|vision","confirmWithWait":true}
 - scheduler: {"type":"interval|cron","intervalMillis":60000,"expression":"0 9 * * *","targetAgentId":"echo","targetPayload":"{}"}
 - notification_listener: {"mode":"list|match"}
 - swarm: {"mode":"status|heartbeat"}
