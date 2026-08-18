@@ -15,6 +15,7 @@ Ordered by **leverage / unlock sequence**. Execute top-down.
 | 9 | **Planner + memory chat + device tools** | Medium | Compose all agents; act on the phone | ✅ **LANDED** |
 | 10 | **ScreenSummaryAgent (text vision)** | Low | Understand current UI via Grok | ✅ **LANDED** |
 | 11 | **ScreenWaitAgent (sync UI chains)** | Low | Reliable multi-step automation | ✅ **LANDED** |
+| 12 | **ScreenActAgent (observe → decide → act loop)** | Medium | Closed-loop UI automation from a natural goal | ✅ **LANDED** |
 
 ## ScreenWaitAgent (#11)
 
@@ -39,8 +40,25 @@ Typical plan fragment after a tap:
 2. `screen_wait` appear “Success” (or package change)
 3. next action
 
+## ScreenActAgent (#12)
+
+Closes the multi-step UI automation loop. Given a natural-language goal, the agent observes the current screen, asks Grok for the single best next action, executes it via `ScreenActionProvider`, optionally waits for the expected change, and repeats until success / max steps / timeout.
+
+- **ScreenActAgent** (`screen_act`) — `goal` · `maxSteps` · `timeoutMs` · `model` · `store` · `confirmWithWait`
+- Composes landed tools: accessibility dump (ScreenReading), Grok decision (ScreenSummary-style), tap/type/swipe/global (ScreenTap), optional confirm (ScreenWait)
+- Planner catalog includes `screen_act` so a goal like “Open Settings and turn Wi-Fi off” can be one dispatchable step
+- **Vision-ready:** `perception=vision` captures a screenshot via `AccessibilityService.takeScreenshot` (API 30+, not MediaProjection) and sends it to `grok-2-vision-latest` as a multimodal image part. The accessibility dump stays as text grounding. If capture fails, the loop falls back to text.
+
+### Example
+
+```bash
+curl -X POST "$WORKER/agents/screen_act/tasks" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"wifi-off","payload":{"goal":"Open Settings and turn Wi-Fi off","maxSteps":8,"timeoutMs":90000,"confirmWithWait":true}}'
+```
+
 ## Execution notes
 
-1–11 closed for the sync layer of the observe → act loop. Next leverage remains true screenshot → Grok vision multimodal, or a multi-step ScreenAct / SmartAction loop that auto-chains summary + wait + tap.
+1–12 closed for the observe → decide → act → confirm loop, including screenshot → Grok vision when `perception=vision`.
 
-*Last updated: 2026-08-18 — #11 ScreenWaitAgent shipped.*
+*Last updated: 2026-08-18 — #12 ScreenActAgent shipped (vision path via accessibility screenshot).*

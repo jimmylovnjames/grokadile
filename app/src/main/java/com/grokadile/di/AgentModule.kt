@@ -9,6 +9,7 @@ import com.grokadile.agent.builtin.HeartbeatAgent
 import com.grokadile.agent.builtin.NotificationListenerAgent
 import com.grokadile.agent.builtin.PlannerAgent
 import com.grokadile.agent.builtin.SchedulerAgent
+import com.grokadile.agent.builtin.ScreenActAgent
 import com.grokadile.agent.builtin.ScreenReadingAgent
 import com.grokadile.agent.builtin.ScreenSummaryAgent
 import com.grokadile.agent.builtin.ScreenTapAgent
@@ -65,6 +66,10 @@ abstract class AgentModule {
     @Binds
     @IntoSet
     abstract fun bindScreenWaitAgent(agent: ScreenWaitAgent): Agent
+
+    @Binds
+    @IntoSet
+    abstract fun bindScreenActAgent(agent: ScreenActAgent): Agent
 
     @Binds
     @IntoSet

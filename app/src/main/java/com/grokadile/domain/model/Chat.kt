@@ -4,9 +4,23 @@ package com.grokadile.domain.model
  *  Grok (xAI) OpenAI-compatible wire format. */
 enum class ChatRole { SYSTEM, USER, ASSISTANT, TOOL }
 
+data class ChatImage(
+    val bytes: ByteArray,
+    val mimeType: String = "image/jpeg",
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ChatImage) return false
+        return mimeType == other.mimeType && bytes.contentEquals(other.bytes)
+    }
+
+    override fun hashCode(): Int = 31 * mimeType.hashCode() + bytes.contentHashCode()
+}
+
 data class ChatMessage(
     val role: ChatRole,
     val content: String,
+    val images: List<ChatImage> = emptyList(),
 )
 
 data class ChatRequest(

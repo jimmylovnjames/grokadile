@@ -37,11 +37,17 @@ object NoopAgentLogger : AgentLogger {
 }
 
 class FakeGrokRepository(
-    private val response: AppResult<ChatResponse>,
+    first: AppResult<ChatResponse>,
+    vararg rest: AppResult<ChatResponse>,
 ) : GrokRepository {
+    private val responses: List<AppResult<ChatResponse>> = listOf(first) + rest
     val requests = mutableListOf<ChatRequest>()
+    private var index = 0
+
     override suspend fun chat(request: ChatRequest): AppResult<ChatResponse> {
         requests += request
+        val response = responses.getOrElse(index) { responses.last() }
+        if (index < responses.lastIndex) index++
         return response
     }
 }

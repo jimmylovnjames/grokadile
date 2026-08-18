@@ -30,4 +30,12 @@ interface ScreenContentProvider {
 
     /** Content description / title of the active window if available. */
     fun activeWindowTitle(): String?
+
+    /**
+     * JPEG bytes of the current display, or null if capture is unavailable
+     * (service down, API 30 required, or takeScreenshot failed).
+     *
+     * Uses AccessibilityService.takeScreenshot — not MediaProjection.
+     */
+    fun screenshot(): ByteArray? = null
 }

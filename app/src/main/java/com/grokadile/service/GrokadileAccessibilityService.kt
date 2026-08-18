@@ -2,15 +2,19 @@ package com.grokadile.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.grokadile.core.logging.GrokLogger
 import com.grokadile.domain.agent.ScreenActionProvider
 import com.grokadile.domain.agent.ScreenContentProvider
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -95,6 +99,14 @@ class GrokadileAccessibilityService : AccessibilityService(),
         } finally {
             // Do not recycle the cached latestRoot
         }
+    }
+
+    override fun screenshot(): ByteArray? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            logger.w(TAG, "screenshot requires API 30+ (this device is ${Build.VERSION.SDK_INT})")
+            return null
+        }
+        return captureScreenshotJpeg()
     }
 
     // ── ScreenActionProvider ───────────────────────────────────────────────
@@ -195,6 +207,75 @@ class GrokadileAccessibilityService : AccessibilityService(),
         if (!ok) return "ERROR: dispatchGesture rejected for $label"
         latch.await(2, TimeUnit.SECONDS)
         return result.get()
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun captureScreenshotJpeg(): ByteArray? {
+        val latch = CountDownLatch(1)
+        val holder = AtomicReference<ByteArray?>()
+        try {
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        try {
+                            holder.set(encodeScreenshotJpeg(screenshot))
+                        } catch (t: Throwable) {
+                            logger.w(TAG, "screenshot encode failed: ${t.message}", t)
+                        } finally {
+                            latch.countDown()
+                        }
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        logger.w(TAG, "takeScreenshot failed code=$errorCode")
+                        latch.countDown()
+                    }
+                },
+            )
+        } catch (t: Throwable) {
+            logger.w(TAG, "takeScreenshot threw: ${t.message}", t)
+            return null
+        }
+        latch.await(4, TimeUnit.SECONDS)
+        return holder.get()
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun encodeScreenshotJpeg(result: ScreenshotResult): ByteArray? {
+        val buffer = result.hardwareBuffer
+        try {
+            val wrapped = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace) ?: return null
+            val software = wrapped.copy(Bitmap.Config.ARGB_8888, false)
+            wrapped.recycle()
+            if (software == null) return null
+            val jpeg = compressScreenshot(software)
+            software.recycle()
+            return jpeg
+        } finally {
+            buffer.close()
+        }
+    }
+
+    private fun compressScreenshot(src: Bitmap): ByteArray {
+        val maxEdge = 1280
+        val longest = maxOf(src.width, src.height)
+        val scaled = if (longest > maxEdge) {
+            val scale = maxEdge.toFloat() / longest
+            Bitmap.createScaledBitmap(
+                src,
+                (src.width * scale).toInt().coerceAtLeast(1),
+                (src.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        } else {
+            src
+        }
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 65, out)
+        if (scaled !== src) scaled.recycle()
+        return out.toByteArray()
     }
 
     private fun performClickOnNode(node: AccessibilityNodeInfo, label: String): String {
@@ -417,6 +498,9 @@ class LiveScreenContentProvider @Inject constructor() : ScreenContentProvider {
 
     override fun activeWindowTitle(): String? =
         GrokadileAccessibilityService.instance?.activeWindowTitle()
+
+    override fun screenshot(): ByteArray? =
+        GrokadileAccessibilityService.instance?.screenshot()
 }
 
 /**
